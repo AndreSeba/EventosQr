@@ -25,11 +25,11 @@ const remitente = () => `"${(process.env.MAIL_FROM_NAME ?? "EventosQr").replace(
 function marco(ev: DatosEvento, titulo: string, cuerpo: string) {
   const fecha = new Date(ev.fecha_inicio).toLocaleString("es-BO", { dateStyle: "full", timeStyle: "short", timeZone: "America/La_Paz" });
   const mapa = ev.direccion_url && /^https?:\/\//.test(ev.direccion_url)
-    ? ` · <a style="color:#ffa94d" href="${esc(ev.direccion_url)}">Ver ubicación</a>` : "";
+    ? ` · <a style="color:#d4d4d4" href="${esc(ev.direccion_url)}">Ver ubicación</a>` : "";
   return `
-<div style="background:#0d0a12;padding:24px;font-family:Arial,sans-serif;color:#eee">
-  <div style="max-width:480px;margin:auto;background:#1a1224;border:1px solid #ff7a1a;border-radius:12px;padding:24px">
-    <h1 style="color:#ff7a1a;margin:0 0 4px">${esc(ev.nombre)}</h1>
+<div style="background:#000;padding:24px;font-family:Arial,sans-serif;color:#eee">
+  <div style="max-width:480px;margin:auto;background:#0e0e0e;border:1px solid #333;border-radius:12px;padding:24px">
+    <h1 style="color:#fff;margin:0 0 4px">${esc(ev.nombre)}</h1>
     <p style="margin:0 0 16px;color:#aaa">${esc(fecha)}${ev.lugar ? " · " + esc(ev.lugar) : ""}${mapa}</p>
     <h2 style="margin:0 0 12px">${titulo}</h2>
     ${cuerpo}
@@ -63,7 +63,7 @@ export async function enviarRechazo(para: string, nombre: string, ev: DatosEvent
     subject: `Sobre tu compra para ${ev.nombre}`,
     html: marco(ev, "No pudimos aprobar tu pago",
       `<p>Hola ${esc(nombre)}, revisamos tu comprobante y no pudimos aprobarlo.</p>
-       <p style="background:#2a1a33;padding:12px;border-radius:8px"><b>Motivo:</b> ${esc(motivo)}</p>
+       <p style="background:#1a1a1a;padding:12px;border-radius:8px"><b>Motivo:</b> ${esc(motivo)}</p>
        <p>Podés volver a intentarlo desde la página del evento con un comprobante correcto.</p>`),
   });
 }
