@@ -1,0 +1,109 @@
+import type { FastifyInstance } from "fastify";
+import { z } from "zod";
+import { eventosDe, exigir, exigirEvento } from "../auth";
+import { db, todas } from "../lib/db";
+import { HttpError } from "../lib/errores";
+import { enviarEntradas, type DatosEvento } from "../lib/mailer";
+import { generarToken } from "../lib/tickets";
+import { emailValido } from "../lib/validar";
+import { exigirCupo } from "../services/cupos";
+
+type Rel<T> = T | T[] | null;
+const uno = <T>(r: Rel<T>): T | undefined => (Array.isArray(r) ? r[0] : (r ?? undefined));
+
+const emitirSchema = z.object({
+  eventoId: z.string().uuid(),
+  tipoTicketId: z.string().uuid(),
+  nombre: z.string().trim().min(2, "Ingresá el nombre del invitado.").max(100),
+  email: z.string().trim().toLowerCase().max(120).optional().nullable().transform((v) => v || null),
+  cantidad: z.coerce.number().int().min(1).max(20).default(1),
+});
+
+export async function entradasRoutes(app: FastifyInstance) {
+  const lectura = { preHandler: exigir("admin", "rrpp", "staff") };
+
+  app.get<{ Querystring: { eventoId?: string; estado?: string; q?: string } }>("/entradas", lectura, async (req) => {
+    const { eventoId, estado } = req.query;
+    if (!eventoId) throw new HttpError(400, "Indicá el evento.");
+    await exigirEvento(req.usuario, eventoId);
+    const q = (req.query.q ?? "").replace(/[%,()*\\]/g, " ").trim().slice(0, 60);
+    const filas = await todas<any>(() => {
+      let c = db()
+        .from("entradas")
+        .select("id, nombre, email, estado, usada_en, anulada_motivo, creada_en, orden_id, tipos_ticket(nombre, categoria)")
+        .eq("evento_id", eventoId)
+        .order("creada_en", { ascending: false });
+      if (["valida", "usada", "anulada"].includes(estado ?? "")) c = c.eq("estado", estado!);
+      if (q) c = c.or(`nombre.ilike.%${q}%,email.ilike.%${q}%`);
+      return c;
+    });
+    return filas.map((e) => {
+      const t = uno<{ nombre: string; categoria: string }>(e.tipos_ticket);
+      return {
+        id: e.id, nombre: e.nombre, email: e.email, estado: e.estado, usadaEn: e.usada_en, anuladaMotivo: e.anulada_motivo,
+        creadaEn: e.creada_en, tipo: t?.nombre ?? "", categoria: t?.categoria ?? "", deOrden: !!e.orden_id,
+      };
+    });
+  });
+
+  // Emisión manual (invitaciones / VIP / cortesías): admin y RRPP de ese evento.
+  app.post("/entradas", { preHandler: exigir("admin", "rrpp") }, async (req, reply) => {
+    const b = emitirSchema.parse(req.body);
+    await exigirEvento(req.usuario, b.eventoId);
+    if (b.email && !emailValido(b.email)) throw new HttpError(400, "El correo no tiene un formato válido.");
+    const { data: tipo } = await db().from("tipos_ticket").select("id, evento_id, nombre, cupo, categoria, activo").eq("id", b.tipoTicketId).maybeSingle();
+    if (!tipo || tipo.evento_id !== b.eventoId || !tipo.activo) throw new HttpError(400, "Tipo de ticket inválido.");
+    if (tipo.categoria === "venta") throw new HttpError(400, "Los tickets de venta se generan al aprobar una compra. Usá un tipo de invitación o VIP.");
+    await exigirCupo(tipo.id, tipo.cupo, b.cantidad);
+
+    const filas = Array.from({ length: b.cantidad }, () => ({
+      evento_id: b.eventoId, tipo_ticket_id: tipo.id, nombre: b.nombre, email: b.email, token: generarToken(), creada_por: req.usuario.id,
+    }));
+    const { data, error } = await db().from("entradas").insert(filas).select("id, token");
+    if (error) throw new Error(error.message);
+
+    let correo: { ok: boolean; error?: string } | null = null;
+    if (b.email) {
+      try {
+        const { data: ev } = await db().from("eventos").select("nombre, fecha_inicio, lugar, direccion_url").eq("id", b.eventoId).single();
+        await enviarEntradas(b.email, b.nombre, ev as DatosEvento, data.map((e) => ({ token: e.token as string, tipo: tipo.nombre })));
+        correo = { ok: true };
+      } catch (e) {
+        correo = { ok: false, error: e instanceof Error ? e.message : String(e) };
+      }
+    }
+    reply.code(201);
+    return { ids: data.map((e) => e.id), correo };
+  });
+
+  app.post<{ Params: { id: string } }>("/entradas/:id/anular", { preHandler: exigir("admin") }, async (req) => {
+    const { motivo } = z.object({ motivo: z.string().trim().min(3, "Indicá un motivo.").max(300) }).parse(req.body);
+    const { data, error } = await db()
+      .from("entradas")
+      .update({ estado: "anulada", anulada_en: new Date().toISOString(), anulada_motivo: motivo })
+      .eq("id", req.params.id)
+      .eq("estado", "valida") // una entrada ya usada no se anula
+      .select("id")
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!data) throw new HttpError(409, "Solo se pueden anular entradas vigentes (no usadas ni ya anuladas).");
+    return { ok: true };
+  });
+
+  app.post<{ Params: { id: string } }>("/entradas/:id/reenviar", { preHandler: exigir("admin", "rrpp") }, async (req) => {
+    const { data: e } = await db()
+      .from("entradas")
+      .select("evento_id, nombre, email, token, estado, orden_id, tipos_ticket(nombre)")
+      .eq("id", req.params.id)
+      .maybeSingle();
+    if (!e) throw new HttpError(404, "Entrada no encontrada.");
+    await exigirEvento(req.usuario, e.evento_id);
+    if (e.estado !== "valida") throw new HttpError(409, "Solo se reenvían entradas vigentes.");
+    let email = e.email as string | null;
+    if (!email && e.orden_id) email = (await db().from("ordenes").select("email").eq("id", e.orden_id).single()).data?.email ?? null;
+    if (!email) throw new HttpError(400, "Esta entrada no tiene un correo asociado.");
+    const { data: ev } = await db().from("eventos").select("nombre, fecha_inicio, lugar, direccion_url").eq("id", e.evento_id).single();
+    await enviarEntradas(email, e.nombre, ev as DatosEvento, [{ token: e.token, tipo: uno<{ nombre: string }>(e.tipos_ticket as Rel<{ nombre: string }>)?.nombre ?? "" }]);
+    return { ok: true };
+  });
+}

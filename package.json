@@ -1,0 +1,35 @@
+{
+  "name": "eventos-qr-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@fastify/cors": "^11.3.1",
+    "@fastify/multipart": "^10.1.4",
+    "@fastify/rate-limit": "^11.2.1",
+    "@supabase/supabase-js": "^2.118.0",
+    "fastify": "^5.12.7",
+    "nodemailer": "^10.1.7",
+    "qrcode": "^1.5.4",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/nodemailer": "^8.0.2",
+    "@types/pngjs": "^6.0.5",
+    "@types/qrcode": "^1.5.6",
+    "jsqr": "^1.4.0",
+    "pngjs": "^7.0.0",
+    "tsup": "^9.0.0",
+    "tsx": "^4.23.15",
+    "typescript": "^6.0.3",
+    "vitest": "^5.0.5"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsup src/index.ts --format esm --target node20 --clean",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  }
+}
