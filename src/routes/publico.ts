@@ -33,7 +33,7 @@ export async function publicoRoutes(app: FastifyInstance) {
       imagenUrl: urlPublica(ev.imagen_path),
       qrPagoUrl: urlPublica(ev.qr_pago_path),
       maxPorOrden: numero("MAX_ENTRADAS_POR_ORDEN", 5),
-      maxComprobanteMb: numero("MAX_COMPROBANTE_MB", 4),
+      maxComprobanteMb: numero("MAX_COMPROBANTE_MB", 2),
       tipos: await Promise.all(
         (tipos ?? []).map(async (t) => ({
           id: t.id, nombre: t.nombre, precio: Number(t.precio), disponibles: await disponibles(t.id, t.cupo),
@@ -52,7 +52,7 @@ export async function publicoRoutes(app: FastifyInstance) {
       if (!v.ok) throw new HttpError(400, v.error);
       if (!campos.tipoTicketId) throw new HttpError(400, "Elegí un tipo de ticket.");
       if (!archivo) throw new HttpError(400, "Adjuntá el comprobante de pago.");
-      if (archivo.length > numero("MAX_COMPROBANTE_MB", 4) * 1024 * 1024) throw new HttpError(413, "El comprobante es demasiado grande.");
+      if (archivo.length > numero("MAX_COMPROBANTE_MB", 2) * 1024 * 1024) throw new HttpError(413, "El comprobante es demasiado grande.");
       const tipo = detectarTipo(archivo);
       if (!tipo) throw new HttpError(415, "El comprobante debe ser JPG, PNG, WEBP o PDF.");
       return { ok: true, ...(await crearOrden(req.params.slug, campos.tipoTicketId, v.datos, archivo, tipo)) };

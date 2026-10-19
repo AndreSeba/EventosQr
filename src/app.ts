@@ -21,7 +21,7 @@ export async function buildApp() {
     methods: ["GET", "POST", "PUT", "DELETE"],
   });
   await app.register(rateLimit, { max: 300, timeWindow: "1 minute" });
-  await app.register(multipart, { limits: { fileSize: numero("MAX_COMPROBANTE_MB", 4) * 1024 * 1024, files: 1, fields: 20 } });
+  await app.register(multipart, { limits: { fileSize: numero("MAX_COMPROBANTE_MB", 2) * 1024 * 1024, files: 1, fields: 20 } });
 
   app.setErrorHandler((err: Error & { statusCode?: number }, req, reply) => {
     if (err instanceof HttpError) return reply.code(err.status).send({ error: err.message });
