@@ -107,6 +107,80 @@ alter table evento_equipo enable row level security;
 alter table ordenes       enable row level security;
 alter table entradas      enable row level security;
 
+-- ============================================================================================
+-- Funciones atómicas de cupo. Cada una bloquea la fila del tipo de ticket (FOR UPDATE) y valida
+-- + escribe en UNA transacción. Sin esto, "contar y luego insertar" deja pasar de más cuando
+-- muchas personas compran a la vez (comprobado con 150 compradores simultáneos).
+-- ============================================================================================
+create or replace function crear_orden(p_slug text, p_tipo uuid, p_nombre text, p_telefono text, p_email text,
+  p_cantidad int, p_path text, p_sha text)
+returns bigint language plpgsql security definer set search_path = public as $$
+declare v_ev eventos; v_t tipos_ticket; v_ocup int; v_num bigint;
+begin
+  select * into v_ev from eventos where slug = p_slug;
+  if not found or v_ev.archivado then raise exception 'EVENTO_NO_ENCONTRADO'; end if;
+  select * into v_t from tipos_ticket
+    where id = p_tipo and evento_id = v_ev.id and activo and categoria = 'venta' for update;
+  if not found then raise exception 'TIPO_INVALIDO'; end if;
+  if v_t.cupo is not null then
+    v_ocup := (select count(*) from entradas where tipo_ticket_id = v_t.id and estado <> 'anulada')
+            + coalesce((select sum(cantidad) from ordenes where tipo_ticket_id = v_t.id and estado = 'Pendiente'), 0);
+    if p_cantidad > v_t.cupo - v_ocup then raise exception 'SIN_CUPO:%', greatest(v_t.cupo - v_ocup, 0); end if;
+  end if;
+  insert into ordenes (evento_id, tipo_ticket_id, nombre, telefono, email, cantidad, monto, comprobante_path, comprobante_sha256)
+  values (v_ev.id, v_t.id, p_nombre, p_telefono, p_email, p_cantidad, v_t.precio * p_cantidad, p_path, p_sha)
+  returning numero into v_num;
+  return v_num;
+end $$;
+
+create or replace function aprobar_orden(p_id uuid, p_user uuid, p_tokens text[])
+returns table (id uuid, evento_id uuid, tipo_ticket_id uuid, nombre text, email text, cantidad int)
+language plpgsql security definer set search_path = public as $$
+declare v_o ordenes; v_t tipos_ticket; v_ocup int;
+begin
+  select * into v_o from ordenes where ordenes.id = p_id for update;
+  if not found then raise exception 'ORDEN_NO_ENCONTRADA'; end if;
+  if v_o.estado <> 'Pendiente' then raise exception 'ORDEN_YA_RESUELTA'; end if;
+  if coalesce(array_length(p_tokens, 1), 0) <> v_o.cantidad then raise exception 'TOKENS_INVALIDOS'; end if;
+  select * into v_t from tipos_ticket where tipos_ticket.id = v_o.tipo_ticket_id for update;
+  if v_t.cupo is not null then
+    -- esta orden ya cuenta como reservada mientras está pendiente: se excluye del conteo
+    v_ocup := (select count(*) from entradas e where e.tipo_ticket_id = v_t.id and e.estado <> 'anulada')
+            + coalesce((select sum(o.cantidad) from ordenes o where o.tipo_ticket_id = v_t.id and o.estado = 'Pendiente' and o.id <> p_id), 0);
+    if v_o.cantidad > v_t.cupo - v_ocup then raise exception 'SIN_CUPO:%', greatest(v_t.cupo - v_ocup, 0); end if;
+  end if;
+  update ordenes set estado = 'Aprobada', resuelta_en = now(), resuelta_por = p_user where ordenes.id = p_id;
+  insert into entradas (evento_id, tipo_ticket_id, orden_id, nombre, email, token, creada_por)
+    select v_o.evento_id, v_o.tipo_ticket_id, p_id, v_o.nombre, v_o.email, t, p_user from unnest(p_tokens) as t;
+  return query select v_o.id, v_o.evento_id, v_o.tipo_ticket_id, v_o.nombre, v_o.email, v_o.cantidad;
+end $$;
+
+create or replace function emitir_entradas(p_evento uuid, p_tipo uuid, p_nombre text, p_email text, p_tokens text[], p_user uuid)
+returns uuid[] language plpgsql security definer set search_path = public as $$
+declare v_t tipos_ticket; v_ocup int; v_ids uuid[];
+begin
+  select * into v_t from tipos_ticket where id = p_tipo and evento_id = p_evento and activo for update;
+  if not found then raise exception 'TIPO_INVALIDO'; end if;
+  if v_t.categoria = 'venta' then raise exception 'TIPO_ES_VENTA'; end if;
+  if v_t.cupo is not null then
+    v_ocup := (select count(*) from entradas where tipo_ticket_id = v_t.id and estado <> 'anulada');
+    if array_length(p_tokens, 1) > v_t.cupo - v_ocup then raise exception 'SIN_CUPO:%', greatest(v_t.cupo - v_ocup, 0); end if;
+  end if;
+  with ins as (
+    insert into entradas (evento_id, tipo_ticket_id, nombre, email, token, creada_por)
+    select p_evento, v_t.id, p_nombre, p_email, t, p_user from unnest(p_tokens) as t returning id
+  ) select array_agg(id) into v_ids from ins;
+  return v_ids;
+end $$;
+
+-- Escriben datos: solo la API (service_role) puede llamarlas, nunca la clave pública.
+revoke all on function crear_orden(text, uuid, text, text, text, int, text, text) from public, anon, authenticated;
+revoke all on function aprobar_orden(uuid, uuid, text[]) from public, anon, authenticated;
+revoke all on function emitir_entradas(uuid, uuid, text, text, text[], uuid) from public, anon, authenticated;
+grant execute on function crear_orden(text, uuid, text, text, text, int, text, text) to service_role;
+grant execute on function aprobar_orden(uuid, uuid, text[]) to service_role;
+grant execute on function emitir_entradas(uuid, uuid, text, text, text[], uuid) to service_role;
+
 -- Buckets: comprobantes PRIVADO; publico (imagen del evento y QR de pago) con lectura pública.
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types) values
   ('comprobantes', 'comprobantes', false, 4194304, array['image/jpeg','image/png','image/webp','application/pdf']),

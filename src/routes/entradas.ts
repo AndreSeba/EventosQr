@@ -2,11 +2,10 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { eventosDe, exigir, exigirEvento } from "../auth";
 import { db, todas } from "../lib/db";
-import { HttpError } from "../lib/errores";
+import { errorDeFuncionSql, HttpError } from "../lib/errores";
 import { enviarEntradas, type DatosEvento } from "../lib/mailer";
 import { generarToken } from "../lib/tickets";
 import { emailValido } from "../lib/validar";
-import { exigirCupo } from "../services/cupos";
 
 type Rel<T> = T | T[] | null;
 const uno = <T>(r: Rel<T>): T | undefined => (Array.isArray(r) ? r[0] : (r ?? undefined));
@@ -51,22 +50,20 @@ export async function entradasRoutes(app: FastifyInstance) {
     const b = emitirSchema.parse(req.body);
     await exigirEvento(req.usuario, b.eventoId);
     if (b.email && !emailValido(b.email)) throw new HttpError(400, "El correo no tiene un formato válido.");
-    const { data: tipo } = await db().from("tipos_ticket").select("id, evento_id, nombre, cupo, categoria, activo").eq("id", b.tipoTicketId).maybeSingle();
-    if (!tipo || tipo.evento_id !== b.eventoId || !tipo.activo) throw new HttpError(400, "Tipo de ticket inválido.");
-    if (tipo.categoria === "venta") throw new HttpError(400, "Los tickets de venta se generan al aprobar una compra. Usá un tipo de invitación o VIP.");
-    await exigirCupo(tipo.id, tipo.cupo, b.cantidad);
-
-    const filas = Array.from({ length: b.cantidad }, () => ({
-      evento_id: b.eventoId, tipo_ticket_id: tipo.id, nombre: b.nombre, email: b.email, token: generarToken(), creada_por: req.usuario.id,
-    }));
-    const { data, error } = await db().from("entradas").insert(filas).select("id, token");
-    if (error) throw new Error(error.message);
+    const tokens = Array.from({ length: b.cantidad }, () => generarToken());
+    // emitir_entradas valida tipo + cupo y escribe en UNA transacción (cupo atómico con muchos RRPP a la vez).
+    const { data: ids, error } = await db().rpc("emitir_entradas", {
+      p_evento: b.eventoId, p_tipo: b.tipoTicketId, p_nombre: b.nombre, p_email: b.email, p_tokens: tokens, p_user: req.usuario.id,
+    });
+    if (error) throw errorDeFuncionSql(error.message) ?? new Error(error.message);
+    const { data: tipo } = await db().from("tipos_ticket").select("nombre").eq("id", b.tipoTicketId).single();
+    const data = (ids as string[]).map((id, i) => ({ id, token: tokens[i] }));
 
     let correo: { ok: boolean; error?: string } | null = null;
     if (b.email) {
       try {
         const { data: ev } = await db().from("eventos").select("nombre, fecha_inicio, lugar, direccion_url").eq("id", b.eventoId).single();
-        await enviarEntradas(b.email, b.nombre, ev as DatosEvento, data.map((e) => ({ token: e.token as string, tipo: tipo.nombre })));
+        await enviarEntradas(b.email, b.nombre, ev as DatosEvento, data.map((e) => ({ token: e.token, tipo: tipo?.nombre ?? "" })));
         correo = { ok: true };
       } catch (e) {
         correo = { ok: false, error: e instanceof Error ? e.message : String(e) };
