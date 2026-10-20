@@ -14,7 +14,11 @@ import { scanRoutes } from "./routes/scan";
 import { usuariosRoutes } from "./routes/usuarios";
 
 export async function buildApp() {
-  const app = Fastify({ logger: true, trustProxy: process.env.TRUST_PROXY === "true", bodyLimit: 1_000_000 });
+  // TRUST_PROXY: número de proxies de confianza delante del API (ej. 1 o 2). Con "true" se confía en TODO el
+  // encabezado X-Forwarded-For y cualquiera puede falsear su IP para esquivar el límite de intentos.
+  const tp = process.env.TRUST_PROXY ?? "";
+  const trustProxy = /^\d+$/.test(tp) ? Number(tp) : tp === "true";
+  const app = Fastify({ logger: true, trustProxy, bodyLimit: 1_000_000 });
 
   await app.register(cors, {
     origin: (process.env.CORS_ORIGINS ?? "http://localhost:5173").split(",").map((s) => s.trim()).filter(Boolean),
