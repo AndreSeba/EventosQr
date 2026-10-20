@@ -13,7 +13,7 @@ services:
       - key: NODE_VERSION
         value: "22"
       - key: TRUST_PROXY
-        value: "true"
+        value: "3"
       - key: SUPABASE_URL
         value: https://gbqufxxaulpzyvwhcjfk.supabase.co
       - key: JWT_SECRET

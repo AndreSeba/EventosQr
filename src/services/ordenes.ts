@@ -65,7 +65,7 @@ async function correoEntradas(orden: OrdenFila): Promise<void> {
 
 /** aprobar_orden valida el cupo, cambia el estado y crea las entradas en UNA transacción.
  *  Idempotente: un segundo clic (o dos admins a la vez) recibe 409 y no duplica entradas. */
-export async function aprobarOrden(id: string, usuarioId: string): Promise<{ correoOk: boolean; error?: string }> {
+export async function aprobarOrden(id: string, usuarioId: string): Promise<{ correoEnCamino: true }> {
   const { data: previa } = await db().from("ordenes").select("cantidad").eq("id", id).maybeSingle();
   if (!previa) throw new HttpError(404, "La orden no existe.");
   const { data, error } = await db().rpc("aprobar_orden", {
@@ -73,15 +73,13 @@ export async function aprobarOrden(id: string, usuarioId: string): Promise<{ cor
   });
   if (error) throw errorDeFuncionSql(error.message) ?? new Error(error.message);
   const orden = (data as OrdenFila[])[0];
-  try {
-    await correoEntradas(orden);
-    return { correoOk: true };
-  } catch (e) {
-    return { correoOk: false, error: e instanceof Error ? e.message : String(e) };
-  }
+  // El correo (SMTP + generar los QR) tarda unos segundos: se envía en segundo plano y la respuesta es inmediata.
+  // Si falla, el error queda guardado en la orden (correo_error) y el panel ofrece «Reenviar correo».
+  void correoEntradas(orden).catch(() => {});
+  return { correoEnCamino: true };
 }
 
-export async function rechazarOrden(id: string, motivo: string, usuarioId: string): Promise<{ correoOk: boolean; error?: string }> {
+export async function rechazarOrden(id: string, motivo: string, usuarioId: string): Promise<{ correoEnCamino: true }> {
   const { data, error } = await db()
     .from("ordenes")
     .update({ estado: "Rechazada", motivo_rechazo: motivo, resuelta_en: new Date().toISOString(), resuelta_por: usuarioId })
@@ -91,13 +89,16 @@ export async function rechazarOrden(id: string, motivo: string, usuarioId: strin
     .maybeSingle();
   if (error) throw new Error(error.message);
   if (!data) throw new HttpError(409, "La orden ya fue resuelta o no existe.");
-  try {
-    await enviarRechazo(data.email, data.nombre, await cargarEvento(data.evento_id), motivo);
-    await db().from("ordenes").update({ correo_enviado_en: new Date().toISOString() }).eq("id", id);
-    return { correoOk: true };
-  } catch (e) {
-    return { correoOk: false, error: e instanceof Error ? e.message : String(e) };
-  }
+  // En segundo plano (ver aprobarOrden): la respuesta no espera al SMTP.
+  void (async () => {
+    try {
+      await enviarRechazo(data.email, data.nombre, await cargarEvento(data.evento_id), motivo);
+      await db().from("ordenes").update({ correo_enviado_en: new Date().toISOString(), correo_error: null }).eq("id", id);
+    } catch (e) {
+      await db().from("ordenes").update({ correo_error: (e instanceof Error ? e.message : String(e)).slice(0, 500) }).eq("id", id);
+    }
+  })().catch(() => {});
+  return { correoEnCamino: true };
 }
 
 export async function reenviarOrden(id: string): Promise<void> {

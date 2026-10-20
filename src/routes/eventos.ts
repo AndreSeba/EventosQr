@@ -2,12 +2,11 @@ import { randomBytes } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { eventosDe, exigir, exigirEvento } from "../auth";
-import { db, BUCKET_PUBLICO, todas, urlPublica } from "../lib/db";
+import { db, BUCKET_PUBLICO, urlPublica } from "../lib/db";
 import { HttpError } from "../lib/errores";
 import { leerFormulario } from "../lib/multipart";
 import { detectarTipo } from "../lib/validar";
 import { frontendUrl } from "../lib/config";
-import { disponibles } from "../services/cupos";
 
 const texto = (max: number) => z.string().trim().max(max).optional().nullable().transform((v) => v || null);
 const eventoSchema = z.object({
@@ -156,31 +155,9 @@ export async function eventosRoutes(app: FastifyInstance) {
   app.get<{ Params: { id: string } }>("/eventos/:id/resumen", miembro, async (req) => {
     const id = req.params.id;
     await exigirEvento(req.usuario, id);
-    const cuenta = async (tabla: string, f: (q: any) => any) => {
-      const { count, error } = await f(db().from(tabla).select("id", { count: "exact", head: true }).eq("evento_id", id));
-      if (error) throw new Error(error.message);
-      return (count as number) ?? 0;
-    };
-    const [total, usadas, anuladas, pendientes] = await Promise.all([
-      cuenta("entradas", (q) => q.neq("estado", "anulada")),
-      cuenta("entradas", (q) => q.eq("estado", "usada")),
-      cuenta("entradas", (q) => q.eq("estado", "anulada")),
-      cuenta("ordenes", (q) => q.eq("estado", "Pendiente")),
-    ]);
-    const aprobadas = await todas<{ monto: string }>(() =>
-      db().from("ordenes").select("monto").eq("evento_id", id).eq("estado", "Aprobada").order("creada_en"),
-    );
-    const { data: tipos } = await db().from("tipos_ticket").select("id, nombre, cupo").eq("evento_id", id).order("creado_en");
-    const porTipo = await Promise.all(
-      (tipos ?? []).map(async (t) => {
-        const { count } = await db().from("entradas").select("id", { count: "exact", head: true }).eq("tipo_ticket_id", t.id).neq("estado", "anulada");
-        return { id: t.id, nombre: t.nombre, cupo: t.cupo, emitidas: count ?? 0, disponibles: await disponibles(t.id, t.cupo) };
-      }),
-    );
-    return {
-      ventas: aprobadas.reduce((s, o) => s + Number(o.monto), 0),
-      ordenesPendientes: pendientes, ordenesAprobadas: aprobadas.length,
-      ticketsEmitidos: total, ticketsUsados: usadas, ticketsAnulados: anuladas, porTipo,
-    };
+    // Una sola consulta a la base (función SQL resumen_evento) en vez de ~15 viajes seguidos.
+    const { data, error } = await db().rpc("resumen_evento", { p_evento: id });
+    if (error) throw new Error(error.message);
+    return data;
   });
 }

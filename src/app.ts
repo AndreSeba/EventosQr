@@ -23,6 +23,8 @@ export async function buildApp() {
   await app.register(cors, {
     origin: (process.env.CORS_ORIGINS ?? "http://localhost:5173").split(",").map((s) => s.trim()).filter(Boolean),
     methods: ["GET", "POST", "PUT", "DELETE"],
+    // El navegador cachea la petición previa (OPTIONS) y no la repite en cada llamada: ahorra ~1 viaje por petición.
+    maxAge: 86400,
   });
   await app.register(rateLimit, { max: 300, timeWindow: "1 minute" });
   await app.register(multipart, { limits: { fileSize: numero("MAX_COMPROBANTE_MB", 2) * 1024 * 1024, files: 1, fields: 20 } });

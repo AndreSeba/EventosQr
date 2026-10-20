@@ -181,6 +181,28 @@ grant execute on function crear_orden(text, uuid, text, text, text, int, text, t
 grant execute on function aprobar_orden(uuid, uuid, text[]) to service_role;
 grant execute on function emitir_entradas(uuid, uuid, text, text, text[], uuid) to service_role;
 
+-- Resumen del Panel en UNA consulta (antes eran ~15 viajes seguidos a la base).
+create or replace function resumen_evento(p_evento uuid) returns jsonb
+language sql stable security definer set search_path = public as $$
+select jsonb_build_object(
+  'ventas',            coalesce((select sum(monto) from ordenes where evento_id = p_evento and estado = 'Aprobada'), 0),
+  'ordenesAprobadas',  (select count(*) from ordenes  where evento_id = p_evento and estado = 'Aprobada'),
+  'ordenesPendientes', (select count(*) from ordenes  where evento_id = p_evento and estado = 'Pendiente'),
+  'ticketsEmitidos',   (select count(*) from entradas where evento_id = p_evento and estado <> 'anulada'),
+  'ticketsUsados',     (select count(*) from entradas where evento_id = p_evento and estado = 'usada'),
+  'ticketsAnulados',   (select count(*) from entradas where evento_id = p_evento and estado = 'anulada'),
+  'porTipo', coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'id', t.id, 'nombre', t.nombre, 'cupo', t.cupo,
+      'emitidas', (select count(*) from entradas e where e.tipo_ticket_id = t.id and e.estado <> 'anulada'),
+      'disponibles', case when t.cupo is null then null else greatest(t.cupo
+          - (select count(*) from entradas e where e.tipo_ticket_id = t.id and e.estado <> 'anulada')
+          - coalesce((select sum(o.cantidad) from ordenes o where o.tipo_ticket_id = t.id and o.estado = 'Pendiente'), 0), 0) end
+    ) order by t.creado_en)
+    from tipos_ticket t where t.evento_id = p_evento), '[]'::jsonb)
+) $$;
+revoke all on function resumen_evento(uuid) from public, anon, authenticated;
+grant execute on function resumen_evento(uuid) to service_role;
 -- Buckets: comprobantes PRIVADO; publico (imagen del evento y QR de pago) con lectura pública.
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types) values
   ('comprobantes', 'comprobantes', false, 4194304, array['image/jpeg','image/png','image/webp','application/pdf']),
