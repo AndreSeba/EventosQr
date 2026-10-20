@@ -22,12 +22,7 @@ export function emailValido(e: string): boolean {
   return e.length <= 120 && EMAIL.test(e);
 }
 
-/** Acepta +, dígitos, espacios, guiones y paréntesis; entre 7 y 15 dígitos. */
-export function telefonoValido(t: string): boolean {
-  if (!/^[+\d\s()-]{7,25}$/.test(t)) return false;
-  const digitos = t.replace(/\D/g, "").length;
-  return digitos >= 7 && digitos <= 15;
-}
+import { normalizarTelefono } from "./contacto";
 
 export type DatosOrden = { nombre: string; telefono: string; email: string; cantidad: number };
 
@@ -40,9 +35,11 @@ export function validarDatosOrden(
   const email = typeof raw.email === "string" ? raw.email.trim().toLowerCase() : "";
   const cantidad = Number(raw.cantidad ?? 1);
   if (nombre.length < 2 || nombre.length > 100) return { ok: false, error: "Ingresá tu nombre completo." };
-  if (!telefonoValido(telefono)) return { ok: false, error: "El teléfono no es válido." };
+  const telefonoNormalizado = normalizarTelefono(telefono);
+  if (!telefonoNormalizado)
+    return { ok: false, error: "Ingresá un celular real: 8 dígitos que empiecen con 6 o 7 (ej. 71234598), o con código de país (+54…)." };
   if (!emailValido(email)) return { ok: false, error: "El correo no tiene un formato válido." };
   if (!Number.isInteger(cantidad) || cantidad < 1 || cantidad > maxCantidad)
     return { ok: false, error: `La cantidad de entradas debe ser entre 1 y ${maxCantidad}.` };
-  return { ok: true, datos: { nombre, telefono, email, cantidad } };
+  return { ok: true, datos: { nombre, telefono: telefonoNormalizado, email, cantidad } };
 }

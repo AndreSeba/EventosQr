@@ -6,6 +6,7 @@ import { generarToken, qrPng, tokenConFormato } from "../src/lib/tickets";
 import { crearToken, hashPassword, leerToken, verificarPassword } from "../src/lib/seguridad";
 import { detectarTipo, validarDatosOrden } from "../src/lib/validar";
 import { limitar } from "../src/lib/ratelimit";
+import { normalizarTelefono, sugerirCorreo, verificarCorreoReal } from "../src/lib/contacto";
 
 type Fila = FilaEntrada & { token: string };
 
@@ -114,14 +115,14 @@ describe("validación", () => {
     expect(detectarTipo(new TextEncoder().encode("<script>alert(1)</script>"))).toBeNull();
   });
   it("datos de la orden", () => {
-    expect(validarDatosOrden({ nombre: " Ana  Pérez ", telefono: "+591 7000-0000", email: " ANA@Mail.com ", cantidad: "2" }, 5)).toEqual({
-      ok: true, datos: { nombre: "Ana Pérez", telefono: "+591 7000-0000", email: "ana@mail.com", cantidad: 2 },
+    expect(validarDatosOrden({ nombre: " Ana  Pérez ", telefono: "+591 7938-4512", email: " ANA@Mail.com ", cantidad: "2" }, 5)).toEqual({
+      ok: true, datos: { nombre: "Ana Pérez", telefono: "+59179384512", email: "ana@mail.com", cantidad: 2 },
     });
     for (const mal of [
-      { nombre: "A", telefono: "70000000", email: "a@b.co", cantidad: 1 },
+      { nombre: "A", telefono: "79384512", email: "a@b.co", cantidad: 1 },
       { nombre: "Ana", telefono: "abc", email: "a@b.co", cantidad: 1 },
-      { nombre: "Ana", telefono: "70000000", email: "x", cantidad: 1 },
-      { nombre: "Ana", telefono: "70000000", email: "a@b.co", cantidad: 6 },
+      { nombre: "Ana", telefono: "79384512", email: "x", cantidad: 1 },
+      { nombre: "Ana", telefono: "79384512", email: "a@b.co", cantidad: 6 },
     ]) expect(validarDatosOrden(mal, 5).ok).toBe(false);
   });
   it("rate limit", () => {
@@ -156,6 +157,37 @@ describe("correo por la API de Gmail", () => {
       globalThis.fetch = original;
       for (const k of ["GMAIL_REFRESH_TOKEN", "GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "SMTP_USER"]) delete process.env[k];
     }
+  });
+});
+
+describe("teléfono y correo reales", () => {
+  it("normaliza celulares de Bolivia y acepta internacionales", () => {
+    expect(normalizarTelefono("79384512")).toBe("+59179384512");
+    expect(normalizarTelefono("793 84 512")).toBe("+59179384512");
+    expect(normalizarTelefono("+591 7938-4512")).toBe("+59179384512");
+    expect(normalizarTelefono("59179384512")).toBe("+59179384512");
+    expect(normalizarTelefono("0059161234598")).toBe("+59161234598");
+    expect(normalizarTelefono("+54 9 11 5938 4721")).toBe("+5491159384721");
+  });
+  it("rechaza números imposibles o inventados", () => {
+    for (const mal of ["", "abc", "12345", "51234598", "7938451", "793845123", "70000000", "77777777", "71234567", "76543210", "71717171",
+      "+591 12345678", "+0 1234567", "+1 123", "+591 6000 0000"])
+      expect(normalizarTelefono(mal), mal).toBeNull();
+  });
+  it("sugiere la corrección de errores de tipeo típicos", () => {
+    expect(sugerirCorreo("ana@gmial.com")).toBe("ana@gmail.com");
+    expect(sugerirCorreo("ana@hotmial.com")).toBe("ana@hotmail.com");
+    expect(sugerirCorreo("ana@gmail.com")).toBeNull();
+  });
+  it("verifica el dominio (DNS), bloquea desechables y tolera fallos de DNS", async () => {
+    const dns = (respuestas: Record<string, boolean | null>) => async (d: string) => (d in respuestas ? respuestas[d] : null);
+    expect(await verificarCorreoReal("a@real-uno.com", dns({ "real-uno.com": true }))).toEqual({ ok: true });
+    const falso = await verificarCorreoReal("a@no-existe-dos.com", dns({ "no-existe-dos.com": false }));
+    expect(falso.ok).toBe(false);
+    const tipeo = await verificarCorreoReal("a@gmial.com", dns({}));
+    expect(tipeo.ok === false && tipeo.error).toContain("a@gmail.com");
+    expect((await verificarCorreoReal("a@mailinator.com", dns({ "mailinator.com": true }))).ok).toBe(false);
+    expect(await verificarCorreoReal("a@dns-caido-tres.com", dns({ "dns-caido-tres.com": null }))).toEqual({ ok: true }); // sin respuesta de DNS: no se bloquea al comprador
   });
 });
 

@@ -3,6 +3,7 @@ import { numero } from "../lib/config";
 import { db, urlPublica } from "../lib/db";
 import { HttpError } from "../lib/errores";
 import { leerFormulario } from "../lib/multipart";
+import { verificarCorreoReal } from "../lib/contacto";
 import { detectarTipo, validarDatosOrden } from "../lib/validar";
 import { disponibles } from "../services/cupos";
 import { crearOrden } from "../services/ordenes";
@@ -50,6 +51,8 @@ export async function publicoRoutes(app: FastifyInstance) {
       if (campos.web) return { ok: true, numero: 0 }; // honeypot: fingimos éxito
       const v = validarDatosOrden(campos, numero("MAX_ENTRADAS_POR_ORDEN", 5));
       if (!v.ok) throw new HttpError(400, v.error);
+      const correo = await verificarCorreoReal(v.datos.email); // dominio existente, no desechable, sin errores de tipeo típicos
+      if (!correo.ok) throw new HttpError(400, correo.error);
       if (!campos.tipoTicketId) throw new HttpError(400, "Elegí un tipo de ticket.");
       if (!archivo) throw new HttpError(400, "Adjuntá el comprobante de pago.");
       if (archivo.length > numero("MAX_COMPROBANTE_MB", 2) * 1024 * 1024) throw new HttpError(413, "El comprobante es demasiado grande.");
