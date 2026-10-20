@@ -16,6 +16,10 @@ function transporte() {
     port: puerto,
     secure: puerto === 465,
     auth: { user: requerido("SMTP_USER"), pass: requerido("SMTP_PASS") },
+    // Si el hosting bloquea SMTP (Render gratis lo hace), fallar en segundos y no tras 2 minutos
+    connectionTimeout: 15_000,
+    greetingTimeout: 15_000,
+    socketTimeout: 30_000,
   });
   return _t;
 }
