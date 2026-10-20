@@ -31,5 +31,8 @@
     "start": "node --env-file-if-exists=.env dist/index.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

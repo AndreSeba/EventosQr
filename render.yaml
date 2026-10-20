@@ -1,0 +1,45 @@
+# Blueprint de Render: New > Blueprint > elegir este repo. Render pide solo los valores marcados "sync: false".
+services:
+  - type: web
+    name: eventosqr-api
+    runtime: node
+    region: oregon          # cerca de Supabase (us-west-2)
+    plan: free
+    # --include=dev: el build necesita tsup y typescript (Render instala solo "dependencies" en producción)
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: TRUST_PROXY
+        value: "true"
+      - key: SUPABASE_URL
+        value: https://gbqufxxaulpzyvwhcjfk.supabase.co
+      - key: JWT_SECRET
+        generateValue: true       # Render genera uno aleatorio y distinto al de desarrollo
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: "465"
+      - key: MAIL_FROM_NAME
+        value: EventosQr
+      - key: MAX_ENTRADAS_POR_ORDEN
+        value: "5"
+      - key: MAX_COMPROBANTE_MB
+        value: "2"
+      # --- Secretos / datos propios: se escriben en el panel de Render, nunca en el repo ---
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: FRONTEND_URL      # URL del front (Cloudflare Pages), sin "/" al final
+        sync: false
+      - key: CORS_ORIGINS      # la misma URL del front
+        sync: false
