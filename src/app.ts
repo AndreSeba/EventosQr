@@ -17,7 +17,7 @@ export async function buildApp() {
   // TRUST_PROXY: número de proxies de confianza delante del API (ej. 1 o 2). Con "true" se confía en TODO el
   // encabezado X-Forwarded-For y cualquiera puede falsear su IP para esquivar el límite de intentos.
   const tp = process.env.TRUST_PROXY ?? "";
-  const trustProxy = /^\d+$/.test(tp) ? Number(tp) : tp === "true";
+  const trustProxy = /^\d+$/.test(tp) ? (_addr: string, salto: number) => salto < Number(tp) : tp === "true";
   const app = Fastify({ logger: true, trustProxy, bodyLimit: 1_000_000 });
 
   await app.register(cors, {
