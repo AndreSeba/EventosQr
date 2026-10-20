@@ -35,7 +35,13 @@ services:
         sync: false
       - key: ADMIN_PASSWORD
         sync: false
-      - key: SMTP_USER
+      - key: SMTP_USER           # remitente (la cuenta de Gmail)
+        sync: false
+      - key: GMAIL_CLIENT_ID     # envío por la API de Gmail (Render gratis bloquea SMTP)
+        sync: false
+      - key: GMAIL_CLIENT_SECRET
+        sync: false
+      - key: GMAIL_REFRESH_TOKEN
         sync: false
       - key: SMTP_PASS
         sync: false

@@ -131,6 +131,34 @@ describe("validación", () => {
   });
 });
 
+describe("correo por la API de Gmail", () => {
+  it("renueva el token, arma el MIME con los QR incrustados y lo envía por HTTPS (sin SMTP)", async () => {
+    Object.assign(process.env, { GMAIL_REFRESH_TOKEN: "rt", GMAIL_CLIENT_ID: "cid", GMAIL_CLIENT_SECRET: "sec", SMTP_USER: "envia@gmail.com" });
+    const llamadas: { url: string; body: string }[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (url: string, init: { body: unknown }) => {
+      llamadas.push({ url: String(url), body: String(init.body) });
+      return String(url).includes("oauth2") ? Response.json({ access_token: "at", expires_in: 3600 }) : Response.json({ id: "m1" });
+    }) as unknown as typeof fetch;
+    try {
+      const { enviarEntradas } = await import("../src/lib/mailer");
+      const token = generarToken();
+      await enviarEntradas("comprador@test.com", "Ana", { nombre: "JIWILIN", fecha_inicio: "2026-10-31T00:00:00Z", lugar: null, direccion_url: null }, [{ token, tipo: "Muerto soltero" }]);
+      expect(llamadas[0].url).toContain("oauth2.googleapis.com/token");
+      expect(llamadas[0].body).toContain("grant_type=refresh_token");
+      expect(llamadas[1].url).toBe("https://gmail.googleapis.com/gmail/v1/users/me/messages/send");
+      const mime = Buffer.from(JSON.parse(llamadas[1].body).raw, "base64url").toString();
+      expect(mime).toContain("To: comprador@test.com");
+      expect(mime).toContain("Subject: Tu entrada para JIWILIN");
+      expect(mime).toContain("Content-ID: <qr0>"); // QR incrustado
+      expect(mime).toContain("image/png");
+    } finally {
+      globalThis.fetch = original;
+      for (const k of ["GMAIL_REFRESH_TOKEN", "GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "SMTP_USER"]) delete process.env[k];
+    }
+  });
+});
+
 describe("API (sin base de datos)", () => {
   let app: Awaited<ReturnType<typeof import("../src/app").buildApp>>;
   beforeAll(async () => {

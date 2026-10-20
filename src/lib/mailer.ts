@@ -7,8 +7,53 @@ export type DatosEvento = { nombre: string; fecha_inicio: string; lugar: string 
 const esc = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
+const remitente = () => `"${(process.env.MAIL_FROM_NAME ?? "EventosQr").replace(/"/g, "")}" <${requerido("SMTP_USER")}>`;
+
+type Mensaje = Parameters<ReturnType<typeof nodemailer.createTransport>["sendMail"]>[0];
+
+// ---------- Envío por la API de Gmail (HTTPS, puerto 443) ----------
+// Render (plan gratis) bloquea SMTP, pero no HTTPS. Se usa OAuth con un refresh token de la cuenta que envía.
+let accesoCache: { token: string; expira: number } | null = null;
+
+async function tokenDeAcceso(): Promise<string> {
+  if (accesoCache && accesoCache.expira > Date.now() + 60_000) return accesoCache.token;
+  const r = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: requerido("GMAIL_CLIENT_ID"),
+      client_secret: requerido("GMAIL_CLIENT_SECRET"),
+      refresh_token: requerido("GMAIL_REFRESH_TOKEN"),
+      grant_type: "refresh_token",
+    }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  const j = (await r.json().catch(() => ({}))) as { access_token?: string; expires_in?: number; error_description?: string; error?: string };
+  if (!r.ok || !j.access_token) throw new Error(`Gmail OAuth: ${j.error_description ?? j.error ?? r.status}`);
+  accesoCache = { token: j.access_token, expira: Date.now() + (j.expires_in ?? 3600) * 1000 };
+  return j.access_token;
+}
+
+async function enviarPorGmailApi(msg: Mensaje): Promise<void> {
+  // nodemailer arma el mensaje MIME completo (HTML + imágenes incrustadas + adjuntos); Gmail lo envía tal cual
+  const armado = await nodemailer.createTransport({ streamTransport: true, buffer: true, newline: "unix" }).sendMail(msg);
+  const raw = (armado.message as Buffer).toString("base64url");
+  const r = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+    method: "POST",
+    headers: { authorization: `Bearer ${await tokenDeAcceso()}`, "content-type": "application/json" },
+    body: JSON.stringify({ raw }),
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!r.ok) {
+    const t = await r.text().catch(() => "");
+    if (r.status === 401) accesoCache = null;
+    throw new Error(`Gmail API ${r.status}: ${t.slice(0, 200)}`);
+  }
+}
+
+// ---------- Envío por SMTP (desarrollo local: algunos hostings lo bloquean) ----------
 let _t: ReturnType<typeof nodemailer.createTransport> | null = null;
-function transporte() {
+function transporteSmtp() {
   if (_t) return _t;
   const puerto = Number(process.env.SMTP_PORT ?? 465);
   _t = nodemailer.createTransport({
@@ -24,8 +69,12 @@ function transporte() {
   return _t;
 }
 
-const remitente = () => `"${(process.env.MAIL_FROM_NAME ?? "EventosQr").replace(/"/g, "")}" <${requerido("SMTP_USER")}>`;
+async function enviar(msg: Mensaje): Promise<void> {
+  if (process.env.GMAIL_REFRESH_TOKEN) return enviarPorGmailApi(msg);
+  await transporteSmtp().sendMail(msg);
+}
 
+// ---------- Contenido ----------
 function marco(ev: DatosEvento, titulo: string, cuerpo: string) {
   const fecha = new Date(ev.fecha_inicio).toLocaleString("es-BO", { dateStyle: "full", timeStyle: "short", timeZone: "America/La_Paz" });
   const mapa = ev.direccion_url && /^https?:\/\//.test(ev.direccion_url)
@@ -50,7 +99,7 @@ export async function enviarEntradas(para: string, nombre: string, ev: DatosEven
         <img src="cid:qr${i}" width="240" height="240" alt="QR entrada ${i + 1}"/></div>`,
     )
     .join("");
-  await transporte().sendMail({
+  await enviar({
     from: remitente(),
     to: para,
     subject: `Tu entrada para ${ev.nombre}`,
@@ -61,7 +110,7 @@ export async function enviarEntradas(para: string, nombre: string, ev: DatosEven
 }
 
 export async function enviarRechazo(para: string, nombre: string, ev: DatosEvento, motivo: string): Promise<void> {
-  await transporte().sendMail({
+  await enviar({
     from: remitente(),
     to: para,
     subject: `Sobre tu compra para ${ev.nombre}`,
