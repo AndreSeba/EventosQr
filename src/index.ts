@@ -15,6 +15,19 @@ async function sembrarAdmin(log: { info: (m: string) => void; warn: (m: string) 
   else log.info(`Administrador inicial creado: ${email}`);
 }
 
+/** Render (plan gratis) duerme el servicio tras 15 min sin tráfico entrante. El servidor se visita a sí mismo por su
+ *  URL pública (pasa por el balanceador de Render, así que cuenta como tráfico) cada 10 min para no dormirse.
+ *  RENDER_EXTERNAL_URL lo define Render solo; KEEP_ALIVE=false lo desactiva. Un monitor externo sigue siendo un buen respaldo. */
+function mantenerDespierto(log: { info: (m: string) => void; warn: (m: string) => void }) {
+  const url = process.env.RENDER_EXTERNAL_URL;
+  if (!url || process.env.KEEP_ALIVE === "false") return;
+  setInterval(() => {
+    fetch(`${url.replace(/\/$/, "")}/health`, { signal: AbortSignal.timeout(20_000) }).catch((e) => log.warn(`keep-alive falló: ${e}`));
+  }, 10 * 60_000);
+  log.info(`keep-alive activo: ${url}/health cada 10 min`);
+}
+
 const app = await buildApp();
 await sembrarAdmin(app.log);
 await app.listen({ port: Number(process.env.PORT ?? 4000), host: "0.0.0.0" });
+mantenerDespierto(app.log);
