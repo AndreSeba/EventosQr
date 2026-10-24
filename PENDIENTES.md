@@ -4,6 +4,14 @@
 
 ## Después del evento JIWILIN (30/10/2026)
 
+### Migrar de npm a pnpm (regla del usuario: nunca instalar con npm, por seguridad)
+
+- [ ] `EventosQr.Api` y `EventosQr.Web` se crearon con npm (tienen `package-lock.json`). Migrar a pnpm: `pnpm import` para convertir el bloqueo,
+      borrar `package-lock.json`, revisar los scripts de instalación bloqueados por pnpm y aprobar solo los necesarios.
+- [ ] Cambiar los comandos de build en Render: API `pnpm install --frozen-lockfile && pnpm run build` (antes `npm install --include=dev && npm run build`),
+      Web igual; activar `corepack enable` o fijar `packageManager` en `package.json`. Probar primero en desarrollo; NO cambiar producción antes del evento.
+- [ ] Actualizar `render.yaml` y el README con los comandos nuevos.
+
 ### Opción B: sistema multi-cliente (varias organizaciones en una sola instalación)
 
 **Para qué:** vender el sistema por evento a distintos clientes sin que se crucen los datos.

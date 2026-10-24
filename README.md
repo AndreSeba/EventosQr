@@ -56,12 +56,12 @@ Puerta: `POST /scan {token}` → `VALIDA | YA_USADA | ANULADA | INVALIDA`.
 1. Supabase: crear proyecto, ejecutar `supabase/schema.sql` en el SQL Editor; copiar *Project URL* y clave `service_role`.
 2. Gmail: activar verificación en 2 pasos y crear una *contraseña de aplicación* (<https://myaccount.google.com/apppasswords>). Límite ≈ 500 correos/día.
 3. `copy .env.example .env` y completar (`JWT_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, SMTP, `CORS_ORIGINS`, `FRONTEND_URL`).
-4. `npm install` · `npm run dev` (http://localhost:4000). En el primer arranque con la tabla `usuarios` vacía se crea el admin con `ADMIN_EMAIL` / `ADMIN_PASSWORD`.
-5. `npm test` · `npm run typecheck` · `npm run build` · `npm start`.
+4. `npm install` · `pnpm run dev` (http://localhost:4000). En el primer arranque con la tabla `usuarios` vacía se crea el admin con `ADMIN_EMAIL` / `ADMIN_PASSWORD`.
+5. `npm test` · `pnpm run typecheck` · `pnpm run build` · `npm start`.
 
 ## Despliegue gratis
 
-Es un servidor Node normal. Opciones sin costo: **Render** (Web Service, build `npm install && npm run build`, start `npm start`; el plan gratis se duerme tras 15 min sin tráfico y tarda ~50 s en despertar: abrí la app unos minutos antes del evento), Koyeb o Fly.io. Cargá todas las variables de `.env.example` en el panel. Con `TRUST_PROXY=true` el rate limit usa la IP real.
+Es un servidor Node normal. Opciones sin costo: **Render** (Web Service, build `npm install && pnpm run build`, start `npm start`; el plan gratis se duerme tras 15 min sin tráfico y tarda ~50 s en despertar: abrí la app unos minutos antes del evento), Koyeb o Fly.io. Cargá todas las variables de `.env.example` en el panel. Con `TRUST_PROXY=true` el rate limit usa la IP real.
 
 ## Límites conocidos
 
@@ -71,7 +71,7 @@ Es un servidor Node normal. Opciones sin costo: **Render** (Web Service, build `
 
 ## Desarrollo y pruebas
 
-Las pruebas se hacen SIEMPRE contra un Postgres local, nunca contra producci�n. Ver [dev/README.md](dev/README.md): 
+Las pruebas se hacen SIEMPRE contra un Postgres local, nunca contra producci�n. Ver [dev/README.md](dev/README.md): 
 pm run dev:db, 
 pm run dev, 
 pm run test:carga.

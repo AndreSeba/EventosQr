@@ -23,23 +23,23 @@ PostgREST necesita las DLL de Postgres: el script ya agrega `dev/pg/pgsql/bin` a
 ## Uso diario
 
 ```bash
-npm run dev:db          # levanta Postgres + PostgREST + gateway (la primera vez crea la base y aplica supabase/schema.sql)
-npm run dev             # API en http://localhost:4000  (usa .env de DESARROLLO)
-npm run test             # pruebas unitarias
-npm run test:carga      # simulación de carga y consistencia por el API (150 compradores, aprobaciones, puerta, permisos)
-npm run dev:db:stop     # apaga todo; los datos de desarrollo se conservan en dev/datos
+pnpm run dev:db          # levanta Postgres + PostgREST + gateway (la primera vez crea la base y aplica supabase/schema.sql)
+pnpm run dev             # API en http://localhost:4000  (usa .env de DESARROLLO)
+pnpm run test             # pruebas unitarias
+pnpm run test:carga      # simulación de carga y consistencia por el API (150 compradores, aprobaciones, puerta, permisos)
+pnpm run dev:db:stop     # apaga todo; los datos de desarrollo se conservan en dev/datos
 ```
 
-El front local (`EventosQr.Web`, `npm run dev`) usa `VITE_API_URL=http://127.0.0.1:4000`, o sea esta misma base.
+El front local (`EventosQr.Web`, `pnpm run dev`) usa `VITE_API_URL=http://127.0.0.1:4000`, o sea esta misma base.
 
 ## Reglas de seguridad
 
 - El `.env` de trabajo apunta a esta base local (usuario `admin@dev.local`). **Las claves de producción no están ahí**: viven en Render.
   Si hace falta una copia local, va en `.env.produccion`, que NUNCA se carga sola.
-- `npm run test:carga` **se niega a correr** si `SUPABASE_URL` no es local (`127.0.0.1` / `localhost`).
+- `pnpm run test:carga` **se niega a correr** si `SUPABASE_URL` no es local (`127.0.0.1` / `localhost`).
 - En desarrollo no hay `SMTP_*` ni `GMAIL_*`: no sale ningún correo.
 - El esquema se aplica desde `supabase/schema.sql`, el mismo archivo que se usa en producción. Si cambias el esquema, cámbialo ahí y
-  recrea la base local (`npm run dev:db:stop`, borrar `dev/datos`, `npm run dev:db`).
+  recrea la base local (`pnpm run dev:db:stop`, borrar `dev/datos`, `pnpm run dev:db`).
 
 ## Qué imita y qué no
 
