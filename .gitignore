@@ -4,3 +4,14 @@ dist
 .env.*
 !.env.example
 
+dev/descargas/
+dev/pg/
+dev/postgrest/
+dev/datos/
+dev/storage/
+
+dev/clave-dev.json
+dev/postgrest.conf
+dev/*.log
+dev/pids/
+

@@ -68,3 +68,11 @@ Es un servidor Node normal. Opciones sin costo: **Render** (Web Service, build `
 - El rate limit es en memoria por instancia (suficiente con una sola instancia).
 - El correo real (SMTP) y la integración con Supabase no se prueban automáticamente: hacé una compra completa de prueba antes del evento.
 - La prueba de concurrencia del escáner usa un almacén en memoria con la misma semántica; la atomicidad real la garantiza Postgres.
+
+## Desarrollo y pruebas
+
+Las pruebas se hacen SIEMPRE contra un Postgres local, nunca contra producci�n. Ver [dev/README.md](dev/README.md): 
+pm run dev:db, 
+pm run dev, 
+pm run test:carga.
+

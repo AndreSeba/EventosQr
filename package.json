@@ -30,7 +30,10 @@
     "build": "tsup src/index.ts --format esm --target node20 --clean",
     "start": "node --env-file-if-exists=.env dist/index.js",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "dev:db": "powershell -ExecutionPolicy Bypass -File dev/iniciar.ps1",
+    "dev:db:stop": "powershell -ExecutionPolicy Bypass -File dev/detener.ps1",
+    "test:carga": "tsx tests/carga/simulacion.ts"
   },
   "engines": {
     "node": ">=22"
