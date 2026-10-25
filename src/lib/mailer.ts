@@ -75,8 +75,17 @@ async function enviar(msg: Mensaje): Promise<void> {
 }
 
 // ---------- Contenido ----------
+const fechaEvento = (ev: DatosEvento) =>
+  new Date(ev.fecha_inicio).toLocaleString("es-BO", { dateStyle: "full", timeStyle: "short", timeZone: "America/La_Paz" });
+
+// Versión en texto plano: un correo solo en HTML sube la puntuación de spam y algunos lectores no muestran HTML
+function marcoTexto(ev: DatosEvento, titulo: string, cuerpo: string) {
+  const mapa = ev.direccion_url && /^https?:\/\//.test(ev.direccion_url) ? `\nUbicación: ${ev.direccion_url}` : "";
+  return `${ev.nombre}\n${fechaEvento(ev)}${ev.lugar ? " · " + ev.lugar : ""}${mapa}\n\n${titulo}\n\n${cuerpo}\n`;
+}
+
 function marco(ev: DatosEvento, titulo: string, cuerpo: string) {
-  const fecha = new Date(ev.fecha_inicio).toLocaleString("es-BO", { dateStyle: "full", timeStyle: "short", timeZone: "America/La_Paz" });
+  const fecha = fechaEvento(ev);
   const mapa = ev.direccion_url && /^https?:\/\//.test(ev.direccion_url)
     ? ` · <a style="color:#d4d4d4" href="${esc(ev.direccion_url)}">Ver ubicación</a>` : "";
   return `
@@ -103,6 +112,10 @@ export async function enviarEntradas(para: string, nombre: string, ev: DatosEven
     from: remitente(),
     to: para,
     subject: `Tu entrada para ${ev.nombre}`,
+    text: marcoTexto(ev, `¡Hola ${nombre}, esta es tu entrada!`,
+      `Presentá el código QR en la puerta: va adjunto como imagen, uno por entrada.\n` +
+      `Cada QR se puede usar una sola vez: no lo compartas ni lo publiques.\n\n` +
+      tokens.map((t, i) => `- entrada-${i + 1}.png: ${t.tipo} · Entrada ${i + 1} de ${tokens.length}`).join("\n")),
     html: marco(ev, `¡Hola ${esc(nombre)}, esta es tu entrada!`,
       `<p>Presentá este código QR en la puerta. <b>Cada QR se puede usar una sola vez</b>: no lo compartas ni lo publiques.</p>${imgs}`),
     attachments: qrs.map((content, i) => ({ filename: `entrada-${i + 1}.png`, content, cid: `qr${i}`, contentType: "image/png" })),
@@ -114,6 +127,9 @@ export async function enviarRechazo(para: string, nombre: string, ev: DatosEvent
     from: remitente(),
     to: para,
     subject: `Sobre tu compra para ${ev.nombre}`,
+    text: marcoTexto(ev, "No pudimos aprobar tu pago",
+      `Hola ${nombre}, revisamos tu comprobante y no pudimos aprobarlo.\n\nMotivo: ${motivo}\n\n` +
+      `Podés volver a intentarlo desde la página del evento con un comprobante correcto.`),
     html: marco(ev, "No pudimos aprobar tu pago",
       `<p>Hola ${esc(nombre)}, revisamos tu comprobante y no pudimos aprobarlo.</p>
        <p style="background:#1a1a1a;padding:12px;border-radius:8px"><b>Motivo:</b> ${esc(motivo)}</p>
