@@ -14,6 +14,8 @@
 
 ### Opción B: sistema multi-cliente (varias organizaciones en una sola instalación)
 
+**ESTADO (24/10/2026): IMPLEMENTADA Y PROBADA EN DESARROLLO, falta publicarla.** Rama multi-cliente; pasos en [docs/RAMAS.md](docs/RAMAS.md). Pendiente de decidir: correo por cliente y textos legales.
+
 **Para qué:** vender el sistema por evento a distintos clientes sin que se crucen los datos.
 **Cuándo:** NO tocar producción antes del evento. Desarrollar en una copia y publicar después del 31/10.
 

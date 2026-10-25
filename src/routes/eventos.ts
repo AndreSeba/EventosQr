@@ -29,7 +29,7 @@ const slugDe = (nombre: string) =>
   nombre.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 55) || "evento";
 
 const salida = (e: Record<string, any>) => ({
-  id: e.id, slug: e.slug, nombre: e.nombre, descripcion: e.descripcion, lugar: e.lugar, direccionUrl: e.direccion_url,
+  id: e.id, orgId: e.org_id, slug: e.slug, nombre: e.nombre, descripcion: e.descripcion, lugar: e.lugar, direccionUrl: e.direccion_url,
   fechaInicio: e.fecha_inicio, moneda: e.moneda, archivado: e.archivado,
   imagenUrl: urlPublica(e.imagen_path), qrPagoUrl: urlPublica(e.qr_pago_path),
   linkVenta: `${frontendUrl()}/e/${e.slug}`,
