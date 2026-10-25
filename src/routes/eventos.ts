@@ -20,6 +20,8 @@ const eventoSchema = z.object({
 const tipoSchema = z.object({
   nombre: z.string().trim().min(2).max(60),
   precio: z.coerce.number().min(0).max(1_000_000),
+  // Precio normal (cuando termine la preventa). Si es mayor que `precio`, el tipo se muestra como PREVENTA.
+  precioRegular: z.preprocess((v) => (v === "" ? null : v), z.coerce.number().min(0).max(1_000_000).nullable().optional()),
   cupo: z.coerce.number().int().positive().max(100_000).nullable().optional(),
   categoria: z.enum(["venta", "invitacion", "vip"]).default("venta"),
   activo: z.boolean().default(true),
@@ -72,7 +74,7 @@ export async function eventosRoutes(app: FastifyInstance) {
     const { data: equipo } = await db().from("evento_equipo").select("usuario_id").eq("evento_id", ev.id);
     return {
       ...salida(ev),
-      tipos: (tipos ?? []).map((t) => ({ id: t.id, nombre: t.nombre, precio: Number(t.precio), cupo: t.cupo, categoria: t.categoria, activo: t.activo })),
+      tipos: (tipos ?? []).map((t) => ({ id: t.id, nombre: t.nombre, precio: Number(t.precio), precioRegular: t.precio_regular === null ? null : Number(t.precio_regular), cupo: t.cupo, categoria: t.categoria, activo: t.activo })),
       equipoIds: (equipo ?? []).map((r) => r.usuario_id),
     };
   });
@@ -120,7 +122,7 @@ export async function eventosRoutes(app: FastifyInstance) {
     const b = tipoSchema.parse(req.body);
     const { data, error } = await db()
       .from("tipos_ticket")
-      .insert({ evento_id: req.params.id, nombre: b.nombre, precio: b.precio, cupo: b.cupo ?? null, categoria: b.categoria, activo: b.activo })
+      .insert({ evento_id: req.params.id, nombre: b.nombre, precio: b.precio, precio_regular: b.precioRegular ?? null, cupo: b.cupo ?? null, categoria: b.categoria, activo: b.activo })
       .select("*")
       .single();
     if (error) throw new HttpError(error.code === "23505" ? 409 : 500, error.code === "23505" ? "Ya existe un tipo con ese nombre." : error.message);
@@ -133,7 +135,7 @@ export async function eventosRoutes(app: FastifyInstance) {
     // categoría fija una vez creado (cambiarla alteraría el significado de tickets ya emitidos)
     const { data, error } = await db()
       .from("tipos_ticket")
-      .update({ nombre: b.nombre, precio: b.precio, cupo: b.cupo ?? null, activo: b.activo })
+      .update({ nombre: b.nombre, precio: b.precio, precio_regular: b.precioRegular ?? null, cupo: b.cupo ?? null, activo: b.activo })
       .eq("id", req.params.id)
       .select("id")
       .maybeSingle();

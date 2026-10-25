@@ -18,7 +18,7 @@ export async function publicoRoutes(app: FastifyInstance) {
     if (!ev || ev.archivado) throw new HttpError(404, "Evento no encontrado.");
     const { data: tipos } = await db()
       .from("tipos_ticket")
-      .select("id, nombre, precio, cupo")
+      .select("id, nombre, precio, precio_regular, cupo")
       .eq("evento_id", ev.id)
       .eq("categoria", "venta")
       .eq("activo", true)
@@ -37,7 +37,7 @@ export async function publicoRoutes(app: FastifyInstance) {
       maxComprobanteMb: numero("MAX_COMPROBANTE_MB", 2),
       tipos: await Promise.all(
         (tipos ?? []).map(async (t) => ({
-          id: t.id, nombre: t.nombre, precio: Number(t.precio), disponibles: await disponibles(t.id, t.cupo),
+          id: t.id, nombre: t.nombre, precio: Number(t.precio), precioRegular: t.precio_regular !== null && Number(t.precio_regular) > Number(t.precio) ? Number(t.precio_regular) : null, disponibles: await disponibles(t.id, t.cupo),
         })),
       ),
     };

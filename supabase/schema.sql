@@ -35,6 +35,7 @@ create table tipos_ticket (
   evento_id uuid not null references eventos (id) on delete restrict,
   nombre    text not null check (char_length(nombre) between 2 and 60),
   precio    numeric(10,2) not null default 0 check (precio >= 0),
+  precio_regular numeric(10,2) check (precio_regular is null or precio_regular >= 0), -- precio normal tras la preventa
   cupo      int check (cupo is null or cupo > 0),   -- null = sin límite
   -- venta: se compra en la landing. invitacion / vip: solo se emiten a mano (equipo).
   categoria text not null default 'venta' check (categoria in ('venta', 'invitacion', 'vip')),
