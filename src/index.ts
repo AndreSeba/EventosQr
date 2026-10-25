@@ -10,7 +10,8 @@ async function sembrarAdmin(log: { info: (m: string) => void; warn: (m: string) 
   const email = process.env.ADMIN_EMAIL?.trim().toLowerCase();
   const pass = process.env.ADMIN_PASSWORD;
   if (!email || !pass || pass.length < 8) return log.warn("No hay usuarios y falta ADMIN_EMAIL / ADMIN_PASSWORD (mín. 8 caracteres).");
-  const { error: e2 } = await db().from("usuarios").insert({ email, nombre: "Administrador", rol: "admin", password_hash: hashPassword(pass) });
+  // El primer usuario es el dueño del sistema: superadmin, sin organización
+  const { error: e2 } = await db().from("usuarios").insert({ email, nombre: "Administrador", rol: "superadmin", password_hash: hashPassword(pass) });
   if (e2) log.warn(`No se pudo crear el admin: ${e2.message}`);
   else log.info(`Administrador inicial creado: ${email}`);
 }

@@ -8,14 +8,16 @@ import { detectarTipo, validarDatosOrden } from "../lib/validar";
 import { disponibles } from "../services/cupos";
 import { crearOrden } from "../services/ordenes";
 
+const orgActiva = (o: unknown) => !!(Array.isArray(o) ? o[0] : (o as { activa?: boolean } | null))?.activa;
+
 export async function publicoRoutes(app: FastifyInstance) {
   app.get<{ Params: { slug: string } }>("/public/eventos/:slug", async (req) => {
     const { data: ev } = await db()
       .from("eventos")
-      .select("id, slug, nombre, descripcion, lugar, direccion_url, fecha_inicio, moneda, imagen_path, qr_pago_path, archivado")
+      .select("id, slug, nombre, descripcion, lugar, direccion_url, fecha_inicio, moneda, imagen_path, qr_pago_path, archivado, organizaciones(activa)")
       .eq("slug", req.params.slug)
       .maybeSingle();
-    if (!ev || ev.archivado) throw new HttpError(404, "Evento no encontrado.");
+    if (!ev || ev.archivado || !orgActiva(ev.organizaciones)) throw new HttpError(404, "Evento no encontrado.");
     const { data: tipos } = await db()
       .from("tipos_ticket")
       .select("id, nombre, precio, cupo")
@@ -53,6 +55,9 @@ export async function publicoRoutes(app: FastifyInstance) {
       if (!v.ok) throw new HttpError(400, v.error);
       const correo = await verificarCorreoReal(v.datos.email); // dominio existente, no desechable, sin errores de tipeo típicos
       if (!correo.ok) throw new HttpError(400, correo.error);
+      // Si la organización fue desactivada, sus ventas se cierran
+      const { data: ev } = await db().from("eventos").select("archivado, organizaciones(activa)").eq("slug", req.params.slug).maybeSingle();
+      if (!ev || ev.archivado || !orgActiva(ev.organizaciones)) throw new HttpError(404, "Evento no encontrado.");
       if (!campos.tipoTicketId) throw new HttpError(400, "Elegí un tipo de ticket.");
       if (!archivo) throw new HttpError(400, "Adjuntá el comprobante de pago.");
       if (archivo.length > numero("MAX_COMPROBANTE_MB", 2) * 1024 * 1024) throw new HttpError(413, "El comprobante es demasiado grande.");

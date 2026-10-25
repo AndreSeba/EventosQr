@@ -19,13 +19,21 @@ export async function authRoutes(app: FastifyInstance) {
     if (!limitar(`login:ip:${req.ip}`, 10, 10 * 60_000) || !limitar(`login:mail:${email}`, 8, 10 * 60_000))
       throw new HttpError(429, "Demasiados intentos. Esperá unos minutos.");
 
-    const { data } = await db().from("usuarios").select("id, email, nombre, rol, activo, password_hash").ilike("email", email).maybeSingle();
+    // ilike compara sin distinguir mayúsculas; se escapan % y _ para que no actúen como comodines
+    const patron = email.replace(/[\\%_]/g, (c) => `\\${c}`);
+    const { data } = await db()
+      .from("usuarios")
+      .select("id, email, nombre, rol, activo, password_hash, org_id, organizaciones(nombre, activa)")
+      .ilike("email", patron)
+      .maybeSingle();
     // Siempre se verifica un hash, exista o no el usuario, para igualar tiempos.
     const ok = verificarPassword(password, data?.password_hash ?? HASH_RELLENO);
-    if (!data || !data.activo || !ok) throw new HttpError(401, "Correo o contraseña incorrectos.");
+    const org = (Array.isArray(data?.organizaciones) ? data?.organizaciones[0] : data?.organizaciones) as { nombre: string; activa: boolean } | null | undefined;
+    // Una organización desactivada deja sin acceso a todos sus usuarios (mismo mensaje que una contraseña mala)
+    if (!data || !data.activo || !ok || (data.rol !== "superadmin" && !org?.activa)) throw new HttpError(401, "Correo o contraseña incorrectos.");
     return {
       token: crearToken(data.id, requerido("JWT_SECRET")),
-      usuario: { id: data.id, email: data.email, nombre: data.nombre, rol: data.rol },
+      usuario: { id: data.id, email: data.email, nombre: data.nombre, rol: data.rol, orgId: data.org_id, orgNombre: org?.nombre ?? null },
     };
   });
 

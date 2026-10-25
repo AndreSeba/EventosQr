@@ -1,22 +1,37 @@
 -- Esquema de EventosQr para Supabase. SQL Editor > New query > pegar todo > Run.
 create extension if not exists pgcrypto;
 
-create type rol_usuario as enum ('admin', 'rrpp', 'staff');
+-- superadmin: dueño del sistema (sin organización). admin/rrpp/staff: siempre dentro de UNA organización.
+create type rol_usuario as enum ('superadmin', 'admin', 'rrpp', 'staff');
 create type estado_orden as enum ('Pendiente', 'Aprobada', 'Rechazada');
+
+-- Cada cliente del sistema es una organización. TODO (eventos, órdenes, entradas, usuarios) cuelga de una organización
+-- y la API nunca deja que una organización lea o toque datos de otra.
+create table organizaciones (
+  id        uuid primary key default gen_random_uuid(),
+  nombre    text not null check (char_length(nombre) between 2 and 100),
+  slug      text not null unique check (slug ~ '^[a-z0-9-]{2,50}$'),
+  activa    boolean not null default true,
+  creada_en timestamptz not null default now()
+);
 
 create table usuarios (
   id            uuid primary key default gen_random_uuid(),
+  org_id        uuid references organizaciones (id) on delete restrict,
   email         text not null check (char_length(email) <= 120),
   nombre        text not null check (char_length(nombre) between 2 and 100),
   password_hash text not null,
   rol           rol_usuario not null,
   activo        boolean not null default true,
-  creado_en     timestamptz not null default now()
+  creado_en     timestamptz not null default now(),
+  constraint ck_usuarios_org check ((rol = 'superadmin') = (org_id is null))
 );
 create unique index usuarios_email_uq on usuarios (lower(email));
+create index usuarios_org_idx on usuarios (org_id);
 
 create table eventos (
   id            uuid primary key default gen_random_uuid(),
+  org_id        uuid not null references organizaciones (id) on delete restrict,
   slug          text not null unique check (slug ~ '^[a-z0-9-]{3,70}$'),
   nombre        text not null check (char_length(nombre) between 2 and 120),
   descripcion   text check (char_length(descripcion) <= 1000),
@@ -100,6 +115,7 @@ create index entradas_evento_idx on entradas (evento_id, estado);
 create index entradas_orden_idx  on entradas (orden_id);
 
 -- La API usa la clave service_role (ignora RLS). RLS sin políticas bloquea la clave pública.
+alter table organizaciones enable row level security;
 alter table usuarios      enable row level security;
 alter table eventos       enable row level security;
 alter table tipos_ticket  enable row level security;
@@ -133,13 +149,18 @@ begin
   return v_num;
 end $$;
 
-create or replace function aprobar_orden(p_id uuid, p_user uuid, p_tokens text[])
+-- p_org: organización de quien aprueba (null = superadmin). Defensa en profundidad: aunque la API ya filtra,
+-- la base se niega a aprobar una orden de otra organización (responde igual que si no existiera).
+create or replace function aprobar_orden(p_id uuid, p_user uuid, p_tokens text[], p_org uuid default null)
 returns table (id uuid, evento_id uuid, tipo_ticket_id uuid, nombre text, email text, cantidad int)
 language plpgsql security definer set search_path = public as $$
 declare v_o ordenes; v_t tipos_ticket; v_ocup int;
 begin
   select * into v_o from ordenes where ordenes.id = p_id for update;
   if not found then raise exception 'ORDEN_NO_ENCONTRADA'; end if;
+  if p_org is not null and (select e.org_id from eventos e where e.id = v_o.evento_id) is distinct from p_org then
+    raise exception 'ORDEN_NO_ENCONTRADA';
+  end if;
   if v_o.estado <> 'Pendiente' then raise exception 'ORDEN_YA_RESUELTA'; end if;
   if coalesce(array_length(p_tokens, 1), 0) <> v_o.cantidad then raise exception 'TOKENS_INVALIDOS'; end if;
   select * into v_t from tipos_ticket where tipos_ticket.id = v_o.tipo_ticket_id for update;
@@ -155,10 +176,13 @@ begin
   return query select v_o.id, v_o.evento_id, v_o.tipo_ticket_id, v_o.nombre, v_o.email, v_o.cantidad;
 end $$;
 
-create or replace function emitir_entradas(p_evento uuid, p_tipo uuid, p_nombre text, p_email text, p_tokens text[], p_user uuid)
+create or replace function emitir_entradas(p_evento uuid, p_tipo uuid, p_nombre text, p_email text, p_tokens text[], p_user uuid, p_org uuid default null)
 returns uuid[] language plpgsql security definer set search_path = public as $$
 declare v_t tipos_ticket; v_ocup int; v_ids uuid[];
 begin
+  if p_org is not null and (select e.org_id from eventos e where e.id = p_evento) is distinct from p_org then
+    raise exception 'TIPO_INVALIDO';
+  end if;
   select * into v_t from tipos_ticket where id = p_tipo and evento_id = p_evento and activo for update;
   if not found then raise exception 'TIPO_INVALIDO'; end if;
   if v_t.categoria = 'venta' then raise exception 'TIPO_ES_VENTA'; end if;
@@ -175,11 +199,11 @@ end $$;
 
 -- Escriben datos: solo la API (service_role) puede llamarlas, nunca la clave pública.
 revoke all on function crear_orden(text, uuid, text, text, text, int, text, text) from public, anon, authenticated;
-revoke all on function aprobar_orden(uuid, uuid, text[]) from public, anon, authenticated;
-revoke all on function emitir_entradas(uuid, uuid, text, text, text[], uuid) from public, anon, authenticated;
+revoke all on function aprobar_orden(uuid, uuid, text[], uuid) from public, anon, authenticated;
+revoke all on function emitir_entradas(uuid, uuid, text, text, text[], uuid, uuid) from public, anon, authenticated;
 grant execute on function crear_orden(text, uuid, text, text, text, int, text, text) to service_role;
-grant execute on function aprobar_orden(uuid, uuid, text[]) to service_role;
-grant execute on function emitir_entradas(uuid, uuid, text, text, text[], uuid) to service_role;
+grant execute on function aprobar_orden(uuid, uuid, text[], uuid) to service_role;
+grant execute on function emitir_entradas(uuid, uuid, text, text, text[], uuid, uuid) to service_role;
 
 -- Resumen del Panel en UNA consulta (antes eran ~15 viajes seguidos a la base).
 create or replace function resumen_evento(p_evento uuid) returns jsonb

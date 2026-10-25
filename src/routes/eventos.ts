@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { eventosDe, exigir, exigirEvento } from "../auth";
+import { eventosDe, exigir, exigirEvento, exigirTipo, esUuid } from "../auth";
 import { db, BUCKET_PUBLICO, urlPublica } from "../lib/db";
 import { HttpError } from "../lib/errores";
 import { leerFormulario } from "../lib/multipart";
@@ -33,6 +33,7 @@ const salida = (e: Record<string, any>) => ({
   fechaInicio: e.fecha_inicio, moneda: e.moneda, archivado: e.archivado,
   imagenUrl: urlPublica(e.imagen_path), qrPagoUrl: urlPublica(e.qr_pago_path),
   linkVenta: `${frontendUrl()}/e/${e.slug}`,
+  organizacion: (Array.isArray(e.organizaciones) ? e.organizaciones[0]?.nombre : e.organizaciones?.nombre) ?? null,
 });
 
 export async function eventosRoutes(app: FastifyInstance) {
@@ -41,7 +42,7 @@ export async function eventosRoutes(app: FastifyInstance) {
 
   app.get<{ Querystring: { archivados?: string } }>("/eventos", miembro, async (req) => {
     const permitidos = await eventosDe(req.usuario);
-    let q = db().from("eventos").select("*").eq("archivado", req.query.archivados === "true").order("fecha_inicio", { ascending: false });
+    let q = db().from("eventos").select("*, organizaciones(nombre)").eq("archivado", req.query.archivados === "true").order("fecha_inicio", { ascending: false });
     if (permitidos) q = q.in("id", permitidos.length ? permitidos : ["00000000-0000-0000-0000-000000000000"]);
     const { data, error } = await q;
     if (error) throw new Error(error.message);
@@ -50,9 +51,15 @@ export async function eventosRoutes(app: FastifyInstance) {
 
   app.post("/eventos", admin, async (req, reply) => {
     const b = eventoSchema.parse(req.body);
+    // El admin crea eventos en SU organización; el superadmin debe indicar en cuál (orgId).
+    const orgId = req.usuario.rol === "superadmin" ? (req.body as { orgId?: string } | null)?.orgId : req.usuario.orgId;
+    if (!esUuid(orgId)) throw new HttpError(400, "Indicá la organización del evento.");
+    const { data: org } = await db().from("organizaciones").select("activa").eq("id", orgId).maybeSingle();
+    if (!org?.activa) throw new HttpError(400, "La organización no existe o está desactivada.");
     const { data, error } = await db()
       .from("eventos")
       .insert({
+        org_id: orgId,
         slug: `${slugDe(b.nombre)}-${randomBytes(3).toString("hex")}`,
         nombre: b.nombre, descripcion: b.descripcion, lugar: b.lugar, direccion_url: b.direccionUrl,
         fecha_inicio: new Date(b.fechaInicio).toISOString(), moneda: b.moneda,
@@ -78,6 +85,7 @@ export async function eventosRoutes(app: FastifyInstance) {
   });
 
   app.put<{ Params: { id: string } }>("/eventos/:id", admin, async (req) => {
+    await exigirEvento(req.usuario, req.params.id);
     const b = eventoSchema.parse(req.body);
     const { data, error } = await db()
       .from("eventos")
@@ -91,6 +99,7 @@ export async function eventosRoutes(app: FastifyInstance) {
   });
 
   app.post<{ Params: { id: string } }>("/eventos/:id/archivar", admin, async (req) => {
+    await exigirEvento(req.usuario, req.params.id);
     const { archivado } = z.object({ archivado: z.boolean() }).parse(req.body);
     const { error } = await db().from("eventos").update({ archivado }).eq("id", req.params.id);
     if (error) throw new Error(error.message);
@@ -99,6 +108,7 @@ export async function eventosRoutes(app: FastifyInstance) {
 
   // Imagen del evento o QR de pago. ?tipo=imagen | qr-pago
   app.post<{ Params: { id: string }; Querystring: { tipo?: string } }>("/eventos/:id/imagen", admin, async (req) => {
+    await exigirEvento(req.usuario, req.params.id);
     const tipo = req.query.tipo === "qr-pago" ? "qr-pago" : "imagen";
     const { archivo } = await leerFormulario(req, "archivo");
     if (!archivo) throw new HttpError(400, "Adjuntá una imagen.");
@@ -117,6 +127,7 @@ export async function eventosRoutes(app: FastifyInstance) {
   });
 
   app.post<{ Params: { id: string } }>("/eventos/:id/tipos", admin, async (req, reply) => {
+    await exigirEvento(req.usuario, req.params.id);
     const b = tipoSchema.parse(req.body);
     const { data, error } = await db()
       .from("tipos_ticket")
@@ -129,6 +140,7 @@ export async function eventosRoutes(app: FastifyInstance) {
   });
 
   app.put<{ Params: { id: string } }>("/tipos/:id", admin, async (req) => {
+    await exigirTipo(req.usuario, req.params.id);
     const b = tipoSchema.parse(req.body);
     // categoría fija una vez creado (cambiarla alteraría el significado de tickets ya emitidos)
     const { data, error } = await db()
@@ -143,7 +155,14 @@ export async function eventosRoutes(app: FastifyInstance) {
   });
 
   app.put<{ Params: { id: string } }>("/eventos/:id/equipo", admin, async (req) => {
+    await exigirEvento(req.usuario, req.params.id);
     const { usuarioIds } = z.object({ usuarioIds: z.array(z.string().uuid()).max(200) }).parse(req.body);
+    // Solo se puede asignar gente de la MISMA organización del evento
+    const { data: evOrg } = await db().from("eventos").select("org_id").eq("id", req.params.id).single();
+    if (usuarioIds.length) {
+      const { data: validos } = await db().from("usuarios").select("id").in("id", usuarioIds).eq("org_id", evOrg!.org_id).neq("rol", "superadmin");
+      if ((validos?.length ?? 0) !== new Set(usuarioIds).size) throw new HttpError(400, "Algún usuario no pertenece a la organización del evento.");
+    }
     await db().from("evento_equipo").delete().eq("evento_id", req.params.id);
     if (usuarioIds.length) {
       const { error } = await db().from("evento_equipo").insert(usuarioIds.map((u) => ({ evento_id: req.params.id, usuario_id: u })));

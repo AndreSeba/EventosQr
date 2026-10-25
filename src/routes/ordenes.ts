@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { exigir } from "../auth";
+import { eventosDe, exigir, exigirEvento, exigirOrden } from "../auth";
 import { BUCKET_COMPROBANTES, db } from "../lib/db";
 import { HttpError } from "../lib/errores";
 import { aprobarOrden, rechazarOrden, reenviarOrden } from "../services/ordenes";
@@ -14,7 +14,17 @@ export async function ordenesRoutes(app: FastifyInstance) {
       .select("*, tipos_ticket(nombre)")
       .order("creada_en", { ascending: false })
       .limit(500);
-    if (req.query.eventoId) q = q.eq("evento_id", req.query.eventoId);
+    if (req.query.eventoId) {
+      await exigirEvento(req.usuario, req.query.eventoId);
+      q = q.eq("evento_id", req.query.eventoId);
+    } else {
+      // Sin evento: solo las órdenes de los eventos de SU organización (el superadmin ve todas)
+      const permitidos = await eventosDe(req.usuario);
+      if (permitidos) {
+        if (!permitidos.length) return [];
+        q = q.in("evento_id", permitidos);
+      }
+    }
     if (["Pendiente", "Aprobada", "Rechazada"].includes(req.query.estado ?? "")) q = q.eq("estado", req.query.estado!);
     const { data, error } = await q;
     if (error) throw new Error(error.message);
@@ -30,6 +40,7 @@ export async function ordenesRoutes(app: FastifyInstance) {
   });
 
   app.get<{ Params: { id: string } }>("/ordenes/:id/comprobante", admin, async (req) => {
+    await exigirOrden(req.usuario, req.params.id);
     const { data } = await db().from("ordenes").select("comprobante_path").eq("id", req.params.id).maybeSingle();
     if (!data) throw new HttpError(404, "Orden no encontrada.");
     const { data: firmada, error } = await db().storage.from(BUCKET_COMPROBANTES).createSignedUrl(data.comprobante_path, 120);
@@ -37,14 +48,19 @@ export async function ordenesRoutes(app: FastifyInstance) {
     return { url: firmada.signedUrl };
   });
 
-  app.post<{ Params: { id: string } }>("/ordenes/:id/aprobar", admin, async (req) => aprobarOrden(req.params.id, req.usuario.id));
+  app.post<{ Params: { id: string } }>("/ordenes/:id/aprobar", admin, async (req) => {
+    await exigirOrden(req.usuario, req.params.id);
+    return aprobarOrden(req.params.id, req.usuario.id, req.usuario.orgId);
+  });
 
   app.post<{ Params: { id: string } }>("/ordenes/:id/rechazar", admin, async (req) => {
+    await exigirOrden(req.usuario, req.params.id);
     const { motivo } = z.object({ motivo: z.string().trim().min(3, "Indicá un motivo.").max(300) }).parse(req.body);
     return rechazarOrden(req.params.id, motivo, req.usuario.id);
   });
 
   app.post<{ Params: { id: string } }>("/ordenes/:id/reenviar", admin, async (req) => {
+    await exigirOrden(req.usuario, req.params.id);
     await reenviarOrden(req.params.id);
     return { ok: true };
   });

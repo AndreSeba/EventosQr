@@ -1,8 +1,8 @@
 /* Simulación de carga y consistencia, TODA por el API real (compras, aprobaciones, puerta, permisos).
  *
- *   npm run dev:db      (levanta Postgres de desarrollo)
- *   npm run dev         (API en :4000, en otra terminal)
- *   npm run test:carga
+ *   pnpm run dev:db      (levanta Postgres de desarrollo)
+ *   pnpm run dev         (API en :4000, en otra terminal)
+ *   pnpm run test:carga
  *
  * SE NIEGA a correr si SUPABASE_URL no es local: nunca contra producción.
  * En desarrollo no hay SMTP ni Gmail configurados, así que no sale ningún correo.
@@ -22,7 +22,7 @@ for (const l of fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.m
 }
 const esLocal = /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(env.SUPABASE_URL ?? "");
 if (!esLocal) {
-  console.error(`✘ SUPABASE_URL=${env.SUPABASE_URL} no es local. Esta simulación solo corre contra el entorno de desarrollo (npm run dev:db).`);
+  console.error(`✘ SUPABASE_URL=${env.SUPABASE_URL} no es local. Esta simulación solo corre contra el entorno de desarrollo (pnpm run dev:db).`);
   process.exit(2);
 }
 const API = (process.env.API_URL ?? `http://127.0.0.1:${env.PORT ?? 4000}`) + "/api";
@@ -64,8 +64,13 @@ void token32;
 async function main() {
   const IP_ADMIN = nuevaIp(); // una IP distinta por corrida: así dos corridas seguidas no comparten el límite de 300 peticiones/min
   // ---------- preparación (por el API) ----------
-  const lg = await call("login", "/auth/login", { body: { email: env.ADMIN_EMAIL, password: env.ADMIN_PASSWORD }, ip: IP_ADMIN });
-  if (lg.s !== 200) throw new Error(`No pude entrar como admin (${lg.s}). ¿Corriste «npm run dev» con el .env de desarrollo?`);
+  const su = await call("login", "/auth/login", { body: { email: env.ADMIN_EMAIL, password: env.ADMIN_PASSWORD }, ip: IP_ADMIN });
+  if (su.s !== 200) throw new Error(`No pude entrar como superadmin (${su.s}). ¿Corriste «pnpm run dev» con el .env de desarrollo?`);
+  // Como un cliente real: el superadmin crea una organización y se opera con el administrador de ESA organización
+  const adminEmail = `sim-admin-${sufijo}@test.local`;
+  const org = await call("admin", "/organizaciones", { token: su.b.token, ip: IP_ADMIN, body: { nombre: `Sim ${sufijo}`, adminNombre: "Admin Sim", adminEmail, adminPassword: "Simulacion-123" } });
+  if (org.s !== 201) throw new Error(`No pude crear la organización (${org.s}).`);
+  const lg = await call("login", "/auth/login", { body: { email: adminEmail, password: "Simulacion-123" }, ip: IP_ADMIN });
   const A = lg.b.token as string;
   const adm = (ruta: string, o: { method?: string; body?: unknown } = {}) => call("admin", ruta, { token: A, ip: IP_ADMIN, ...o });
   const ev = (await adm("/eventos", { body: { nombre: `Simulación ${sufijo}`, lugar: "Santa Cruz", fechaInicio: "2026-10-30T20:00:00-04:00", moneda: "BOB" } })).b;
@@ -197,6 +202,7 @@ async function main() {
   await sb.from("tipos_ticket").delete().eq("evento_id", ev.id);
   await sb.from("eventos").delete().eq("id", ev.id);
   await sb.from("usuarios").delete().like("email", `sim-%-${sufijo}@test.local`);
+  await sb.from("organizaciones").delete().eq("id", org.b.id);
   console.log(`limpieza de desarrollo: evento, ${paths.length} comprobantes y usuarios de simulación borrados`);
   process.exit(checks.every(Boolean) ? 0 : 1);
 }

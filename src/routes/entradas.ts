@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { eventosDe, exigir, exigirEvento } from "../auth";
+import { exigir, exigirEntrada, exigirEvento } from "../auth";
 import { db, todas } from "../lib/db";
 import { errorDeFuncionSql, HttpError } from "../lib/errores";
 import { enviarEntradas, type DatosEvento } from "../lib/mailer";
@@ -54,6 +54,7 @@ export async function entradasRoutes(app: FastifyInstance) {
     // emitir_entradas valida tipo + cupo y escribe en UNA transacción (cupo atómico con muchos RRPP a la vez).
     const { data: ids, error } = await db().rpc("emitir_entradas", {
       p_evento: b.eventoId, p_tipo: b.tipoTicketId, p_nombre: b.nombre, p_email: b.email, p_tokens: tokens, p_user: req.usuario.id,
+      p_org: req.usuario.orgId, // defensa en profundidad: la base también verifica la organización
     });
     if (error) throw errorDeFuncionSql(error.message) ?? new Error(error.message);
     const { data: tipo } = await db().from("tipos_ticket").select("nombre").eq("id", b.tipoTicketId).single();
@@ -74,6 +75,7 @@ export async function entradasRoutes(app: FastifyInstance) {
   });
 
   app.post<{ Params: { id: string } }>("/entradas/:id/anular", { preHandler: exigir("admin") }, async (req) => {
+    await exigirEntrada(req.usuario, req.params.id);
     const { motivo } = z.object({ motivo: z.string().trim().min(3, "Indicá un motivo.").max(300) }).parse(req.body);
     const { data, error } = await db()
       .from("entradas")

@@ -9,16 +9,24 @@ import { authRoutes } from "./routes/auth";
 import { entradasRoutes } from "./routes/entradas";
 import { eventosRoutes } from "./routes/eventos";
 import { ordenesRoutes } from "./routes/ordenes";
+import { organizacionesRoutes } from "./routes/organizaciones";
 import { publicoRoutes } from "./routes/publico";
 import { scanRoutes } from "./routes/scan";
 import { usuariosRoutes } from "./routes/usuarios";
 
-export async function buildApp() {
+export type RutaRegistrada = { metodo: string; url: string };
+
+/** `onRuta` permite a las pruebas listar TODAS las rutas registradas (ver tests/rutas.test.ts). */
+export async function buildApp(opciones: { onRuta?: (r: RutaRegistrada) => void } = {}) {
   // TRUST_PROXY: número de proxies de confianza delante del API (ej. 1 o 2). Con "true" se confía en TODO el
   // encabezado X-Forwarded-For y cualquiera puede falsear su IP para esquivar el límite de intentos.
   const tp = process.env.TRUST_PROXY ?? "";
   const trustProxy = /^\d+$/.test(tp) ? (_addr: string, salto: number) => salto < Number(tp) : tp === "true";
-  const app = Fastify({ logger: true, trustProxy, bodyLimit: 1_000_000 });
+  const app = Fastify({ logger: process.env.VITEST ? false : true, trustProxy, bodyLimit: 1_000_000 });
+  if (opciones.onRuta) {
+    const aviso = opciones.onRuta;
+    app.addHook("onRoute", (r) => { for (const m of [r.method].flat()) if (m !== "HEAD" && m !== "OPTIONS") aviso({ metodo: String(m), url: r.url }); });
+  }
 
   await app.register(cors, {
     origin: (process.env.CORS_ORIGINS ?? "http://localhost:5173").split(",").map((s) => s.trim()).filter(Boolean),
@@ -46,6 +54,7 @@ export async function buildApp() {
     await api.register(ordenesRoutes);
     await api.register(entradasRoutes);
     await api.register(usuariosRoutes);
+    await api.register(organizacionesRoutes);
     await api.register(scanRoutes);
   }, { prefix: "/api" });
 

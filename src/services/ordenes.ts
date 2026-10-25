@@ -65,11 +65,12 @@ async function correoEntradas(orden: OrdenFila): Promise<void> {
 
 /** aprobar_orden valida el cupo, cambia el estado y crea las entradas en UNA transacción.
  *  Idempotente: un segundo clic (o dos admins a la vez) recibe 409 y no duplica entradas. */
-export async function aprobarOrden(id: string, usuarioId: string): Promise<{ correoEnCamino: true }> {
+export async function aprobarOrden(id: string, usuarioId: string, orgId: string | null): Promise<{ correoEnCamino: true }> {
   const { data: previa } = await db().from("ordenes").select("cantidad").eq("id", id).maybeSingle();
   if (!previa) throw new HttpError(404, "La orden no existe.");
   const { data, error } = await db().rpc("aprobar_orden", {
     p_id: id, p_user: usuarioId, p_tokens: Array.from({ length: previa.cantidad }, () => generarToken()),
+    p_org: orgId, // la base también se niega a aprobar una orden de otra organización
   });
   if (error) throw errorDeFuncionSql(error.message) ?? new Error(error.message);
   const orden = (data as OrdenFila[])[0];
