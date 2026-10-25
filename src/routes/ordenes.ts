@@ -34,7 +34,7 @@ export async function ordenesRoutes(app: FastifyInstance) {
         id: o.id, numero: o.numero, eventoId: o.evento_id, tipo: (Array.isArray(t) ? t[0]?.nombre : t?.nombre) ?? "",
         nombre: o.nombre, telefono: o.telefono, email: o.email, cantidad: o.cantidad, monto: Number(o.monto),
         estado: o.estado, motivoRechazo: o.motivo_rechazo, creadaEn: o.creada_en,
-        correoEnviadoEn: o.correo_enviado_en, correoError: o.correo_error,
+        correoEnviadoEn: o.correo_enviado_en, correoError: o.correo_error, acceso: o.acceso, ref: o.ref,
       };
     });
   });

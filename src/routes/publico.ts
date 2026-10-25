@@ -4,9 +4,9 @@ import { db, urlPublica } from "../lib/db";
 import { HttpError } from "../lib/errores";
 import { leerFormulario } from "../lib/multipart";
 import { verificarCorreoReal } from "../lib/contacto";
-import { detectarTipo, validarDatosOrden } from "../lib/validar";
+import { detectarTipo, limpiarRef, validarDatosOrden } from "../lib/validar";
 import { disponibles } from "../services/cupos";
-import { crearOrden } from "../services/ordenes";
+import { crearOrden, ordenPublica } from "../services/ordenes";
 
 const orgActiva = (o: unknown) => !!(Array.isArray(o) ? o[0] : (o as { activa?: boolean } | null))?.activa;
 
@@ -14,7 +14,7 @@ export async function publicoRoutes(app: FastifyInstance) {
   app.get<{ Params: { slug: string } }>("/public/eventos/:slug", async (req) => {
     const { data: ev } = await db()
       .from("eventos")
-      .select("id, slug, nombre, descripcion, lugar, direccion_url, fecha_inicio, moneda, imagen_path, qr_pago_path, archivado, organizaciones(activa)")
+      .select("id, slug, nombre, descripcion, lugar, direccion_url, fecha_inicio, moneda, imagen_path, qr_pago_path, edad_minima, whatsapp, archivado, organizaciones(activa)")
       .eq("slug", req.params.slug)
       .maybeSingle();
     if (!ev || ev.archivado || !orgActiva(ev.organizaciones)) throw new HttpError(404, "Evento no encontrado.");
@@ -35,6 +35,8 @@ export async function publicoRoutes(app: FastifyInstance) {
       moneda: ev.moneda,
       imagenUrl: urlPublica(ev.imagen_path),
       qrPagoUrl: urlPublica(ev.qr_pago_path),
+      edadMinima: ev.edad_minima,
+      whatsapp: ev.whatsapp,
       maxPorOrden: numero("MAX_ENTRADAS_POR_ORDEN", 5),
       maxComprobanteMb: numero("MAX_COMPROBANTE_MB", 2),
       tipos: await Promise.all(
@@ -63,7 +65,17 @@ export async function publicoRoutes(app: FastifyInstance) {
       if (archivo.length > numero("MAX_COMPROBANTE_MB", 2) * 1024 * 1024) throw new HttpError(413, "El comprobante es demasiado grande.");
       const tipo = detectarTipo(archivo);
       if (!tipo) throw new HttpError(415, "El comprobante debe ser JPG, PNG, WEBP o PDF.");
-      return { ok: true, ...(await crearOrden(req.params.slug, campos.tipoTicketId, v.datos, archivo, tipo)) };
+      return { ok: true, ...(await crearOrden(req.params.slug, campos.tipoTicketId, v.datos, archivo, tipo, limpiarRef(campos.ref))) };
+    },
+  );
+
+  // Link de la orden: quien tiene el token (64 caracteres al azar) ve el estado y, si se aprobó, sus QR.
+  app.get<{ Params: { acceso: string } }>(
+    "/public/ordenes/:acceso",
+    { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } },
+    async (req) => {
+      if (!/^[a-f0-9]{64}$/.test(req.params.acceso)) throw new HttpError(404, "Orden no encontrada.");
+      return ordenPublica(req.params.acceso);
     },
   );
 }

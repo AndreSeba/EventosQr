@@ -45,6 +45,21 @@ compradores y comprobantes. No darle rol `admin` a un cliente nuevo en esta inst
 
 **Ya resuelto para multi-cliente:** cada evento tiene su propio QR de pago, así que el dinero va directo a la cuenta de cada cliente.
 
+### Mejoras de la compra (rama `mejoras-compra`, API y Web) — HECHAS EN DESARROLLO, falta publicarlas
+
+Ideas tomadas de otra ticketera y probadas en local (25/10/2026). Dependen de multi-cliente: se publican con él o después.
+Hechas: link de la orden con el QR en pantalla (`/o/<token>`) y «Mis entradas» en el teléfono; dudas rápidas y botón de WhatsApp
+(número por evento); datos del comprador recordados con «No soy yo»; compartir evento y agregar al calendario; casilla de privacidad;
+edad mínima por evento; link por promotor (`?r=nombre`) con ventas por promotor en Órdenes; barra fija con el total; vista previa
+con nombre, fecha e imagen al compartir por WhatsApp (función de Cloudflare Pages).
+
+- [ ] Al publicar: ejecutar `supabase/migraciones/004_mejoras_compra.sql` en Supabase ANTES de desplegar el API.
+- [ ] En Cloudflare Pages (EventosQr.Web) agregar la variable `API_URL` (o dejar `VITE_API_URL` disponible también en tiempo de ejecución)
+      para la vista previa al compartir. Probar después con el depurador de Facebook o mandando el link por WhatsApp.
+- [ ] Textos legales: hoy la casilla de privacidad tiene una frase corta. Falta la página de términos y la política de privacidad completas.
+- [ ] **Fases de venta visibles** (Fase 1 agotada, Fase 2 a la venta, Fase 3 próxima, con sus precios): queda para después por ser
+      más delicado (cambia precios y cupos por fase, y cuándo se pasa de una a otra). Generalizaría la preventa actual (`precio_regular`).
+
 ## Pendientes operativos (antes de vender entradas de JIWILIN)
 
 - [ ] **Publicar la app de Google** (Google Auth Platform → Público → Publicar aplicación) y sacar un **refresh token nuevo**

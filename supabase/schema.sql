@@ -41,6 +41,8 @@ create table eventos (
   moneda        text not null default 'BOB' check (moneda ~ '^[A-Z]{3}$'),
   imagen_path   text,
   qr_pago_path  text,
+  edad_minima   int check (edad_minima is null or edad_minima between 1 and 99),
+  whatsapp      text check (whatsapp is null or whatsapp ~ '^\+[0-9]{8,15}$'),   -- contacto para dudas de los compradores
   archivado     boolean not null default false,
   creado_en     timestamptz not null default now()
 );
@@ -83,6 +85,9 @@ create table ordenes (
   resuelta_por       uuid references usuarios (id),
   correo_enviado_en  timestamptz,
   correo_error       text,
+  -- token secreto del link de la orden (/o/<acceso>): el comprador ve el estado y sus QR aunque el correo no le llegue
+  acceso             text not null unique default (replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', '')),
+  ref                text check (ref is null or ref ~ '^[a-z0-9-]{1,40}$'),   -- promotor (?r= en el link de venta)
   creada_en          timestamptz not null default now(),
   resuelta_en        timestamptz,
   constraint ck_motivo check (estado <> 'Rechazada' or char_length(coalesce(motivo_rechazo, '')) >= 3)

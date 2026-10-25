@@ -4,7 +4,7 @@ import jsQR from "jsqr";
 import { escanear, type EntradaStore, type FilaEntrada } from "../src/lib/scan";
 import { generarToken, qrPng, tokenConFormato } from "../src/lib/tickets";
 import { crearToken, hashPassword, leerToken, verificarPassword } from "../src/lib/seguridad";
-import { detectarTipo, validarDatosOrden } from "../src/lib/validar";
+import { detectarTipo, limpiarRef, ocultarCorreo, validarDatosOrden } from "../src/lib/validar";
 import { limitar } from "../src/lib/ratelimit";
 import { normalizarTelefono, sugerirCorreo, verificarCorreoReal } from "../src/lib/contacto";
 
@@ -125,6 +125,14 @@ describe("validación", () => {
       { nombre: "Ana", telefono: "79384512", email: "a@b.co", cantidad: 6 },
     ]) expect(validarDatosOrden(mal, 5).ok).toBe(false);
   });
+  it("código del promotor (?r=) y correo oculto en el link de la orden", () => {
+    expect(limpiarRef("Luciana Gil")).toBe("luciana-gil");
+    expect(limpiarRef("  José_Pérez!! ")).toBe("jose-perez");
+    expect(limpiarRef("x".repeat(60))).toHaveLength(40);
+    for (const nada of ["", "---", "¡¿", undefined, 5]) expect(limpiarRef(nada)).toBeNull();
+    expect(ocultarCorreo("ana.perez@gmail.com")).toBe("an•••••@gmail.com");
+    expect(ocultarCorreo("ab@x.com")).toBe("a•••••@x.com");
+  });
   it("rate limit", () => {
     for (let i = 0; i < 3; i++) expect(limitar("k", 3, 1000, 0)).toBe(true);
     expect(limitar("k", 3, 1000, 10)).toBe(false);
@@ -144,7 +152,7 @@ describe("correo por la API de Gmail", () => {
     try {
       const { enviarEntradas } = await import("../src/lib/mailer");
       const token = generarToken();
-      await enviarEntradas("comprador@test.com", "Ana", { nombre: "JIWILIN", fecha_inicio: "2026-10-31T00:00:00Z", lugar: null, direccion_url: null }, [{ token, tipo: "Muerto soltero" }]);
+      await enviarEntradas("comprador@test.com", "Ana", { nombre: "JIWILIN", fecha_inicio: "2026-10-31T00:00:00Z", lugar: null, direccion_url: null }, [{ token, tipo: "Muerto soltero" }], "https://web.test/o/abc123");
       expect(llamadas[0].url).toContain("oauth2.googleapis.com/token");
       expect(llamadas[0].body).toContain("grant_type=refresh_token");
       expect(llamadas[1].url).toBe("https://gmail.googleapis.com/gmail/v1/users/me/messages/send");
@@ -153,6 +161,8 @@ describe("correo por la API de Gmail", () => {
       expect(mime).toContain("Subject: Tu entrada para JIWILIN");
       expect(mime).toContain("Content-ID: <qr0>"); // QR incrustado
       expect(mime).toContain("image/png");
+      expect(mime).toContain("text/plain"); // versión en texto plano (menos spam)
+      expect(mime).toContain("https://web.test/o/abc123"); // link de la orden
     } finally {
       globalThis.fetch = original;
       for (const k of ["GMAIL_REFRESH_TOKEN", "GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "SMTP_USER"]) delete process.env[k];
