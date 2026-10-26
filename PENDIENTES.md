@@ -54,8 +54,11 @@ edad mínima por evento; link por promotor (`?r=nombre`) con ventas por promotor
 con nombre, fecha e imagen al compartir por WhatsApp (función de Cloudflare Pages).
 
 - [ ] Al publicar: ejecutar `supabase/migraciones/004_mejoras_compra.sql` en Supabase ANTES de desplegar el API.
-- [ ] En Cloudflare Pages (EventosQr.Web) agregar la variable `API_URL` (o dejar `VITE_API_URL` disponible también en tiempo de ejecución)
-      para la vista previa al compartir. Probar después con el depurador de Facebook o mandando el link por WhatsApp.
+- [ ] Vista previa al compartir (nombre, fecha e imagen del evento en WhatsApp): está hecha como función de **Cloudflare Pages**
+      (`functions/e/[slug].ts`), pero el Web hoy está en **Render** (`eventosqr-web.onrender.com`, static site), donde no corre.
+      Opciones: pasar el Web a Cloudflare Pages (gratis; variable `API_URL`) o que el API sirva el HTML de `/e/<slug>`. Decidir.
+- [ ] Variable `VITE_CONTACTO_WHATSAPP` en el static site de Render (el WhatsApp del dueño para el botón de `/organizadores`).
+- [ ] Avisar al equipo que el acceso al panel pasa de `/login` a **`/equipo`** (la raíz `/` sin sesión ahora muestra la página para organizadores).
 - [ ] Textos legales: hoy la casilla de privacidad tiene una frase corta. Falta la página de términos y la política de privacidad completas.
 - [ ] **Fases de venta visibles** (Fase 1 agotada, Fase 2 a la venta, Fase 3 próxima, con sus precios): queda para después por ser
       más delicado (cambia precios y cupos por fase, y cuándo se pasa de una a otra). Generalizaría la preventa actual (`precio_regular`).
