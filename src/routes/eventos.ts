@@ -22,7 +22,7 @@ const eventoSchema = z.object({
   whatsapp: texto(25).transform((v, ctx) => {
     if (!v) return null;
     const n = normalizarTelefono(v);
-    if (!n) ctx.addIssue({ code: "custom", message: "WhatsApp de contacto inválido: 8 dígitos (ej. 71234598) o con código de país (+54…)." });
+    if (!n) ctx.addIssue({ code: "custom", message: "WhatsApp del organizador inválido:8 dígitos (ej. 71234598) o con código de país (+54…)." });
     return n ?? null;
   }),
 });
