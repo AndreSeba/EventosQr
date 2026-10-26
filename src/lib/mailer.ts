@@ -99,7 +99,10 @@ function marco(ev: DatosEvento, titulo: string, cuerpo: string) {
 </div>`;
 }
 
-export async function enviarEntradas(para: string, nombre: string, ev: DatosEvento, tokens: { token: string; tipo: string }[]): Promise<void> {
+/** linkOrden: el link de la orden, donde la entrada también se ve en pantalla (las invitaciones manuales no tienen). */
+export async function enviarEntradas(
+  para: string, nombre: string, ev: DatosEvento, tokens: { token: string; tipo: string }[], linkOrden?: string,
+): Promise<void> {
   const qrs = await Promise.all(tokens.map((t) => qrPng(t.token)));
   const imgs = qrs
     .map(
@@ -115,9 +118,11 @@ export async function enviarEntradas(para: string, nombre: string, ev: DatosEven
     text: marcoTexto(ev, `¡Hola ${nombre}, esta es tu entrada!`,
       `Presentá el código QR en la puerta: va adjunto como imagen, uno por entrada.\n` +
       `Cada QR se puede usar una sola vez: no lo compartas ni lo publiques.\n\n` +
-      tokens.map((t, i) => `- entrada-${i + 1}.png: ${t.tipo} · Entrada ${i + 1} de ${tokens.length}`).join("\n")),
+      tokens.map((t, i) => `- entrada-${i + 1}.png: ${t.tipo} · Entrada ${i + 1} de ${tokens.length}`).join("\n") +
+      (linkOrden ? `\n\nTambién podés verla en línea cuando quieras: ${linkOrden}` : "")),
     html: marco(ev, `¡Hola ${esc(nombre)}, esta es tu entrada!`,
-      `<p>Presentá este código QR en la puerta. <b>Cada QR se puede usar una sola vez</b>: no lo compartas ni lo publiques.</p>${imgs}`),
+      `<p>Presentá este código QR en la puerta. <b>Cada QR se puede usar una sola vez</b>: no lo compartas ni lo publiques.</p>${imgs}` +
+      (linkOrden ? `<p style="text-align:center"><a style="display:inline-block;background:#fff;color:#000;padding:10px 16px;border-radius:8px;text-decoration:none;font-weight:bold" href="${esc(linkOrden)}">Ver mi entrada en línea</a></p>` : "")),
     attachments: qrs.map((content, i) => ({ filename: `entrada-${i + 1}.png`, content, cid: `qr${i}`, contentType: "image/png" })),
   });
 }

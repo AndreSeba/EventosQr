@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { BUCKET_COMPROBANTES, db } from "../lib/db";
+import { frontendUrl } from "../lib/config";
+import { BUCKET_COMPROBANTES, db, urlPublica } from "../lib/db";
 import { errorDeFuncionSql, HttpError } from "../lib/errores";
 import { enviarEntradas, enviarRechazo, type DatosEvento } from "../lib/mailer";
 import { sha256Hex } from "../lib/seguridad";
-import { generarToken } from "../lib/tickets";
-import type { DatosOrden, TipoArchivo } from "../lib/validar";
+import { generarToken, qrPng } from "../lib/tickets";
+import { ocultarCorreo, type DatosOrden, type TipoArchivo } from "../lib/validar";
 
 export async function crearOrden(
   slug: string,
@@ -12,7 +13,8 @@ export async function crearOrden(
   datos: DatosOrden,
   archivo: Uint8Array,
   tipoArchivo: TipoArchivo,
-): Promise<{ numero: number }> {
+  ref: string | null = null,
+): Promise<{ numero: number; acceso: string | null }> {
   const path = `${slug}/${randomUUID()}.${tipoArchivo.ext}`;
   const sub = await db().storage.from(BUCKET_COMPROBANTES).upload(path, archivo, { contentType: tipoArchivo.mime, upsert: false });
   if (sub.error) throw new Error(`No se pudo guardar el comprobante: ${sub.error.message}`);
@@ -31,7 +33,48 @@ export async function crearOrden(
     }
     throw errorDeFuncionSql(error.message) ?? new Error(error.message);
   }
-  return { numero: Number(data) };
+  const numero = Number(data);
+  // El promotor solo sirve para contar ventas: si esto fallara, la orden ya está creada y la compra sigue siendo válida
+  const fila = ref
+    ? await db().from("ordenes").update({ ref }).eq("numero", numero).select("acceso").maybeSingle()
+    : await db().from("ordenes").select("acceso").eq("numero", numero).maybeSingle();
+  return { numero, acceso: (fila.data?.acceso as string | undefined) ?? null };
+}
+
+const linkOrden = (acceso: string) => `${frontendUrl()}/o/${acceso}`;
+const uno = <T>(r: T | T[] | null): T | null => (Array.isArray(r) ? r[0] ?? null : r);
+
+/** Lo que ve el comprador en el link de su orden. Sin teléfono ni comprobante, y el correo a medias: el link se puede compartir. */
+export async function ordenPublica(acceso: string) {
+  const { data: o } = await db()
+    .from("ordenes")
+    .select("id, numero, nombre, email, cantidad, monto, estado, motivo_rechazo, creada_en, tipos_ticket(nombre), eventos(slug, nombre, fecha_inicio, lugar, direccion_url, moneda, imagen_path, whatsapp, edad_minima)")
+    .eq("acceso", acceso)
+    .maybeSingle();
+  if (!o) throw new HttpError(404, "Orden no encontrada.");
+  const ev = uno(o.eventos as unknown as Record<string, any> | Record<string, any>[] | null)!;
+  let entradas: { tipo: string; estado: string; qr: string | null }[] = [];
+  if (o.estado === "Aprobada") {
+    const { data } = await db().from("entradas").select("token, estado, tipos_ticket(nombre)").eq("orden_id", o.id).order("creada_en");
+    entradas = await Promise.all(
+      (data ?? []).map(async (e) => ({
+        tipo: uno(e.tipos_ticket as unknown as { nombre: string } | { nombre: string }[] | null)?.nombre ?? "",
+        estado: e.estado as string,
+        // Una entrada anulada no muestra su QR
+        qr: e.estado === "anulada" ? null : `data:image/png;base64,${(await qrPng(e.token as string)).toString("base64")}`,
+      })),
+    );
+  }
+  return {
+    numero: o.numero, nombre: o.nombre, correo: ocultarCorreo(o.email), cantidad: o.cantidad, monto: Number(o.monto),
+    estado: o.estado, motivoRechazo: o.motivo_rechazo, creadaEn: o.creada_en,
+    tipo: uno(o.tipos_ticket as unknown as { nombre: string } | { nombre: string }[] | null)?.nombre ?? "",
+    evento: {
+      slug: ev.slug, nombre: ev.nombre, fechaInicio: ev.fecha_inicio, lugar: ev.lugar, direccionUrl: ev.direccion_url,
+      moneda: ev.moneda, imagenUrl: urlPublica(ev.imagen_path), whatsapp: ev.whatsapp, edadMinima: ev.edad_minima,
+    },
+    entradas,
+  };
 }
 
 type OrdenFila = { id: string; evento_id: string; tipo_ticket_id: string; nombre: string; email: string; cantidad: number };
@@ -54,8 +97,9 @@ async function correoEntradas(orden: OrdenFila): Promise<void> {
     const t = e.tipos_ticket as unknown as { nombre: string } | { nombre: string }[] | null;
     return { token: e.token as string, tipo: (Array.isArray(t) ? t[0]?.nombre : t?.nombre) ?? "" };
   });
+  const { data: a } = await db().from("ordenes").select("acceso").eq("id", orden.id).maybeSingle();
   try {
-    await enviarEntradas(orden.email, orden.nombre, await cargarEvento(orden.evento_id), tokens);
+    await enviarEntradas(orden.email, orden.nombre, await cargarEvento(orden.evento_id), tokens, a?.acceso ? linkOrden(a.acceso) : undefined);
     await db().from("ordenes").update({ correo_enviado_en: new Date().toISOString(), correo_error: null }).eq("id", orden.id);
   } catch (e) {
     await db().from("ordenes").update({ correo_error: (e instanceof Error ? e.message : String(e)).slice(0, 500) }).eq("id", orden.id);

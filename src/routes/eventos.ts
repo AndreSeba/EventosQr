@@ -7,6 +7,7 @@ import { HttpError } from "../lib/errores";
 import { leerFormulario } from "../lib/multipart";
 import { detectarTipo } from "../lib/validar";
 import { frontendUrl } from "../lib/config";
+import { normalizarTelefono } from "../lib/contacto";
 
 const texto = (max: number) => z.string().trim().max(max).optional().nullable().transform((v) => v || null);
 const eventoSchema = z.object({
@@ -16,6 +17,14 @@ const eventoSchema = z.object({
   direccionUrl: texto(500).refine((v) => !v || /^https?:\/\//.test(v), "La dirección debe ser un enlace http(s)."),
   fechaInicio: z.string().refine((v) => !Number.isNaN(Date.parse(v)), "Fecha inválida."),
   moneda: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/, "Moneda de 3 letras (ej. BOB).").default("BOB"),
+  edadMinima: z.preprocess((v) => (v === "" ? null : v), z.coerce.number().int().min(1).max(99, "Edad mínima entre 1 y 99.").nullable().optional()),
+  // Número al que escriben los compradores con dudas (botón de WhatsApp en la compra y en el link de la orden)
+  whatsapp: texto(25).transform((v, ctx) => {
+    if (!v) return null;
+    const n = normalizarTelefono(v);
+    if (!n) ctx.addIssue({ code: "custom", message: "WhatsApp de contacto inválido: 8 dígitos (ej. 71234598) o con código de país (+54…)." });
+    return n ?? null;
+  }),
 });
 const tipoSchema = z.object({
   nombre: z.string().trim().min(2).max(60),
@@ -32,7 +41,7 @@ const slugDe = (nombre: string) =>
 
 const salida = (e: Record<string, any>) => ({
   id: e.id, orgId: e.org_id, slug: e.slug, nombre: e.nombre, descripcion: e.descripcion, lugar: e.lugar, direccionUrl: e.direccion_url,
-  fechaInicio: e.fecha_inicio, moneda: e.moneda, archivado: e.archivado,
+  fechaInicio: e.fecha_inicio, moneda: e.moneda, archivado: e.archivado, edadMinima: e.edad_minima, whatsapp: e.whatsapp,
   imagenUrl: urlPublica(e.imagen_path), qrPagoUrl: urlPublica(e.qr_pago_path),
   linkVenta: `${frontendUrl()}/e/${e.slug}`,
   organizacion: (Array.isArray(e.organizaciones) ? e.organizaciones[0]?.nombre : e.organizaciones?.nombre) ?? null,
@@ -64,7 +73,7 @@ export async function eventosRoutes(app: FastifyInstance) {
         org_id: orgId,
         slug: `${slugDe(b.nombre)}-${randomBytes(3).toString("hex")}`,
         nombre: b.nombre, descripcion: b.descripcion, lugar: b.lugar, direccion_url: b.direccionUrl,
-        fecha_inicio: new Date(b.fechaInicio).toISOString(), moneda: b.moneda,
+        fecha_inicio: new Date(b.fechaInicio).toISOString(), moneda: b.moneda, edad_minima: b.edadMinima ?? null, whatsapp: b.whatsapp,
       })
       .select("*")
       .single();
@@ -91,7 +100,10 @@ export async function eventosRoutes(app: FastifyInstance) {
     const b = eventoSchema.parse(req.body);
     const { data, error } = await db()
       .from("eventos")
-      .update({ nombre: b.nombre, descripcion: b.descripcion, lugar: b.lugar, direccion_url: b.direccionUrl, fecha_inicio: new Date(b.fechaInicio).toISOString(), moneda: b.moneda })
+      .update({
+        nombre: b.nombre, descripcion: b.descripcion, lugar: b.lugar, direccion_url: b.direccionUrl, fecha_inicio: new Date(b.fechaInicio).toISOString(),
+        moneda: b.moneda, edad_minima: b.edadMinima ?? null, whatsapp: b.whatsapp,
+      })
       .eq("id", req.params.id)
       .select("*")
       .maybeSingle();

@@ -22,6 +22,21 @@ export function emailValido(e: string): boolean {
   return e.length <= 120 && EMAIL.test(e);
 }
 
+/** Código del promotor que viene en el link de venta (?r=Luciana Gil → "luciana-gil"). null si no queda nada usable. */
+export function limpiarRef(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const r = v.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+/, "").slice(0, 40).replace(/-+$/, "");
+  return r || null;
+}
+
+/** "ana.perez@gmail.com" → "an•••••@gmail.com": el link de la orden se puede compartir, el correo completo no se muestra
+ *  (siempre 5 puntos, para no revelar ni el largo). */
+export function ocultarCorreo(email: string): string {
+  const [usuario, dominio] = email.split("@");
+  return `${usuario.slice(0, usuario.length <= 3 ? 1 : 2)}•••••@${dominio}`;
+}
+
 import { normalizarTelefono } from "./contacto";
 
 export type DatosOrden = { nombre: string; telefono: string; email: string; cantidad: number };

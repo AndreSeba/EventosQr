@@ -7,6 +7,7 @@ export const PUBLICAS = [
   "POST /api/auth/login",
   "GET /api/public/eventos/:slug",
   "POST /api/public/eventos/:slug/ordenes",
+  "GET /api/public/ordenes/:acceso", // protegida por el token secreto de la orden (64 caracteres al azar)
 ];
 
 /** Dependen solo del usuario de la sesión (no reciben ids de otros recursos). */
