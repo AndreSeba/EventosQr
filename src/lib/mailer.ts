@@ -1,5 +1,5 @@
 import nodemailer from "nodemailer";
-import { requerido } from "./config";
+import { frontendUrl, requerido } from "./config";
 import { qrPng } from "./tickets";
 
 export type DatosEvento = { nombre: string; fecha_inicio: string; lugar: string | null; direccion_url: string | null };
@@ -81,7 +81,8 @@ const fechaEvento = (ev: DatosEvento) =>
 // Versión en texto plano: un correo solo en HTML sube la puntuación de spam y algunos lectores no muestran HTML
 function marcoTexto(ev: DatosEvento, titulo: string, cuerpo: string) {
   const mapa = ev.direccion_url && /^https?:\/\//.test(ev.direccion_url) ? `\nUbicación: ${ev.direccion_url}` : "";
-  return `${ev.nombre}\n${fechaEvento(ev)}${ev.lugar ? " · " + ev.lugar : ""}${mapa}\n\n${titulo}\n\n${cuerpo}\n`;
+  return `${ev.nombre}\n${fechaEvento(ev)}${ev.lugar ? " · " + ev.lugar : ""}${mapa}\n\n${titulo}\n\n${cuerpo}\n\n` +
+    `--\nEntradas con EventosQr · ¿Organizás eventos? ${frontendUrl()}/organizadores\n`;
 }
 
 function marco(ev: DatosEvento, titulo: string, cuerpo: string) {
@@ -96,6 +97,9 @@ function marco(ev: DatosEvento, titulo: string, cuerpo: string) {
     <h2 style="margin:0 0 12px">${titulo}</h2>
     ${cuerpo}
   </div>
+  <p style="max-width:480px;margin:14px auto 0;text-align:center;font-size:12px;color:#777">
+    Entradas con <a style="color:#bbb" href="${esc(frontendUrl())}/organizadores">EventosQr</a> · ¿Organizás eventos? Vendé tus entradas con QR.
+  </p>
 </div>`;
 }
 
