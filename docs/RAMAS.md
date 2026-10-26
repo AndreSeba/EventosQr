@@ -5,10 +5,8 @@
 | `main` | **Producción.** Render la despliega automáticamente en cada push. | **Sí** |
 | `qa` | Pruebas finales antes de producción. | No |
 | `dev` | Integración del trabajo de desarrollo. | No |
-| `multi-cliente` | Rama de la función «organizaciones» (ver abajo). | No |
-| `mejoras-compra` | Link de la orden, promotores, WhatsApp, etc. Sale de `dev` y depende de multi-cliente. | No |
 
-Flujo: rama de la función → `dev` → `qa` → `main`. Nunca se empuja directo a `main` algo que no pasó por `dev` y `qa`.
+Flujo: rama de la función → `dev` → `qa` → `main`. Las ramas de función se borran una vez publicadas. Nunca se empuja directo a `main` algo que no pasó por `dev` y `qa`.
 Mientras haya un evento en curso, `main` no se toca salvo urgencias.
 
 Las pruebas se hacen SIEMPRE contra el Postgres local (`dev/README.md`), nunca contra producción.
