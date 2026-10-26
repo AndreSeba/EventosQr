@@ -60,6 +60,29 @@ con nombre, fecha e imagen al compartir por WhatsApp (función de Cloudflare Pag
 - [ ] **Fases de venta visibles** (Fase 1 agotada, Fase 2 a la venta, Fase 3 próxima, con sus precios): queda para después por ser
       más delicado (cambia precios y cupos por fase, y cuándo se pasa de una a otra). Generalizaría la preventa actual (`precio_regular`).
 
+### Ambiente de pruebas (staging) en el VPS de Hostinger
+
+**Para qué:** probar `dev` en internet (con celulares reales, HTTPS y el link de venta) sin tocar producción.
+**Cuándo:** después del evento. Producción queda como está (Render + Supabase + Cloudflare Pages).
+
+| | Producción (como hoy) | Pruebas (nuevo) |
+|---|---|---|
+| Rama | `main` | `dev` |
+| Web | Cloudflare Pages | Cloudflare Pages, preview de la rama `dev` (`VITE_API_URL` de «Preview» → API de pruebas) |
+| API | Render | VPS · `api-dev.<dominio>` |
+| Base | Supabase | VPS · Postgres + PostgREST + gateway (lo mismo de `dev/`, en Docker; no gasta otro proyecto de Supabase) |
+| Correo | Gmail real | apagado o solo a una dirección de prueba |
+
+- [ ] Datos que hacen falta: plan del VPS (CPU/RAM) y sistema operativo; dominio o subdominio para `api-dev`
+      (sin dominio: túnel de Cloudflare); cómo se entra por SSH.
+- [ ] Docker Compose con API + Postgres + PostgREST + gateway, con claves propias en un `.env` que vive solo en el VPS. Build con pnpm, nunca npm.
+- [ ] Caddy delante con HTTPS automático (el escáner necesita HTTPS para la cámara).
+- [ ] Despliegue de `dev`: script que trae la rama, reconstruye y reinicia; después, automático con GitHub Actions en cada push a `dev`.
+- [ ] Seguridad: firewall (solo 22, 80, 443), SSH solo con llave, actualizaciones automáticas, copias diarias de la base de pruebas.
+- [ ] Nunca datos reales de compradores en pruebas.
+- [ ] Más adelante, evaluar mover producción al VPS: no se duerme como Render gratis y Hostinger tiene São Paulo (más cerca que Oregón),
+      pero las copias, el monitoreo y las actualizaciones pasan a ser nuestros. Decidir con el staging ya andando un tiempo.
+
 ## Pendientes operativos (antes de vender entradas de JIWILIN)
 
 - [ ] **Publicar la app de Google** (Google Auth Platform → Público → Publicar aplicación) y sacar un **refresh token nuevo**
