@@ -31,7 +31,8 @@ export async function entradasRoutes(app: FastifyInstance) {
         .from("entradas")
         .select("id, nombre, email, estado, usada_en, anulada_motivo, creada_en, orden_id, tipos_ticket(nombre, categoria)")
         .eq("evento_id", eventoId)
-        .order("creada_en", { ascending: false });
+        .order("creada_en", { ascending: false })
+        .order("id"); // desempate: con 1.000+ filas los bloques no deben repetir ni saltarse filas
       if (["valida", "usada", "anulada"].includes(estado ?? "")) c = c.eq("estado", estado!);
       if (q) c = c.or(`nombre.ilike.%${q}%,email.ilike.%${q}%`);
       return c;

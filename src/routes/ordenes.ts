@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { eventosDe, exigir, exigirEvento, exigirOrden } from "../auth";
-import { BUCKET_COMPROBANTES, db } from "../lib/db";
+import { BUCKET_COMPROBANTES, db, todas } from "../lib/db";
 import { HttpError } from "../lib/errores";
 import { aprobarOrden, rechazarOrden, reenviarOrden } from "../services/ordenes";
 
@@ -9,25 +9,24 @@ export async function ordenesRoutes(app: FastifyInstance) {
   const admin = { preHandler: exigir("admin") };
 
   app.get<{ Querystring: { eventoId?: string; estado?: string } }>("/ordenes", admin, async (req) => {
-    let q = db()
-      .from("ordenes")
-      .select("*, tipos_ticket(nombre)")
-      .order("creada_en", { ascending: false })
-      .limit(500);
+    let permitidos: string[] | null = null;
     if (req.query.eventoId) {
       await exigirEvento(req.usuario, req.query.eventoId);
-      q = q.eq("evento_id", req.query.eventoId);
     } else {
       // Sin evento: solo las órdenes de los eventos de SU organización (el superadmin ve todas)
-      const permitidos = await eventosDe(req.usuario);
-      if (permitidos) {
-        if (!permitidos.length) return [];
-        q = q.in("evento_id", permitidos);
-      }
+      permitidos = await eventosDe(req.usuario);
+      if (permitidos && !permitidos.length) return [];
     }
-    if (["Pendiente", "Aprobada", "Rechazada"].includes(req.query.estado ?? "")) q = q.eq("estado", req.query.estado!);
-    const { data, error } = await q;
-    if (error) throw new Error(error.message);
+    const estado = req.query.estado ?? "";
+    // Todas las órdenes (en bloques de 1000): antes había un tope de 500 que dejaba fuera las más antiguas, y con ellas
+    // la lista, las ventas por promotor y el Excel salían incompletos. El orden por id desempata para que los bloques no se repitan.
+    const data = await todas<any>(() => {
+      let q = db().from("ordenes").select("*, tipos_ticket(nombre)").order("creada_en", { ascending: false }).order("id");
+      if (req.query.eventoId) q = q.eq("evento_id", req.query.eventoId);
+      else if (permitidos) q = q.in("evento_id", permitidos);
+      if (["Pendiente", "Aprobada", "Rechazada"].includes(estado)) q = q.eq("estado", estado);
+      return q;
+    });
     return data.map((o) => {
       const t = o.tipos_ticket as { nombre: string } | { nombre: string }[] | null;
       return {
