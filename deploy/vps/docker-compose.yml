@@ -1,0 +1,35 @@
+# EventosQr en el VPS: la API + un túnel de Cloudflare (la IP del servidor no se expone y no hace falta abrir los puertos 80/443).
+# Las claves NO van acá: se definen como variables del proyecto en hPanel (Docker Manager) o en un .env que vive solo en el servidor.
+name: eventosqr
+services:
+  api:
+    build:
+      context: https://github.com/AndreSeba/EventosQr.git#main
+    restart: unless-stopped
+    mem_limit: 512m
+    environment:
+      PORT: "4000"
+      # Detrás del túnel de Cloudflare llega 1 salto. Confirmar con un login de prueba que el rate limit ve la IP real (ver README).
+      TRUST_PROXY: "1"
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      JWT_SECRET: ${JWT_SECRET}
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      FRONTEND_URL: ${FRONTEND_URL}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      SMTP_USER: ${SMTP_USER}
+      GMAIL_CLIENT_ID: ${GMAIL_CLIENT_ID}
+      GMAIL_CLIENT_SECRET: ${GMAIL_CLIENT_SECRET}
+      GMAIL_REFRESH_TOKEN: ${GMAIL_REFRESH_TOKEN}
+      MAIL_FROM_NAME: EventosQr
+      MAX_ENTRADAS_POR_ORDEN: "5"
+      MAX_COMPROBANTE_MB: "2"
+  tunel:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN}
+    depends_on:
+      - api
