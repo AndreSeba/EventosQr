@@ -6,7 +6,8 @@ import { leerFormulario } from "../lib/multipart";
 import { verificarCorreoReal } from "../lib/contacto";
 import { detectarTipo, limpiarRef, validarDatosOrden } from "../lib/validar";
 import { disponibles } from "../services/cupos";
-import { crearOrden, ordenPublica } from "../services/ordenes";
+import { validarTitulares } from "../lib/titulares";
+import { cambiarTitularComprador, crearOrden, ordenPublica, transferirEntrada } from "../services/ordenes";
 
 const orgActiva = (o: unknown) => !!(Array.isArray(o) ? o[0] : (o as { activa?: boolean } | null))?.activa;
 
@@ -65,9 +66,24 @@ export async function publicoRoutes(app: FastifyInstance) {
       if (archivo.length > numero("MAX_COMPROBANTE_MB", 2) * 1024 * 1024) throw new HttpError(413, "El comprobante es demasiado grande.");
       const tipo = detectarTipo(archivo);
       if (!tipo) throw new HttpError(415, "El comprobante debe ser JPG, PNG, WEBP o PDF.");
-      return { ok: true, ...(await crearOrden(req.params.slug, campos.tipoTicketId, v.datos, archivo, tipo, limpiarRef(campos.ref))) };
+      // Cédula y nombres de los acompañantes: opcionales. Si vienen mal escritos se avisa ANTES de guardar el comprobante.
+      const tit = validarTitulares(campos.titulares, v.datos.cantidad);
+      if (!tit.ok) throw new HttpError(400, tit.error);
+      return { ok: true, ...(await crearOrden(req.params.slug, campos.tipoTicketId, v.datos, archivo, tipo, limpiarRef(campos.ref), tit.titulares)) };
     },
   );
+
+  // El comprador corrige el titular de una de sus entradas, o la transfiere (QR nuevo, el anterior deja de servir).
+  // Las dos exigen el token secreto de la orden y que el evento no haya empezado.
+  const limite = { config: { rateLimit: { max: 20, timeWindow: "1 minute" } } };
+  app.put<{ Params: { acceso: string; n: string }; Body: { nombre?: unknown; ci?: unknown } }>("/public/ordenes/:acceso/entradas/:n", limite, async (req) => {
+    await cambiarTitularComprador(req.params.acceso, Number(req.params.n), req.body ?? {});
+    return { ok: true };
+  });
+  app.post<{ Params: { acceso: string; n: string }; Body: { nombre?: unknown; ci?: unknown } }>("/public/ordenes/:acceso/entradas/:n/transferir", limite, async (req) => {
+    await transferirEntrada(req.params.acceso, Number(req.params.n), req.body ?? {});
+    return { ok: true };
+  });
 
   // Link de la orden: quien tiene el token (64 caracteres al azar) ve el estado y, si se aprobó, sus QR.
   app.get<{ Params: { acceso: string } }>(

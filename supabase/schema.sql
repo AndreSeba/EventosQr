@@ -88,6 +88,7 @@ create table ordenes (
   -- token secreto del link de la orden (/o/<acceso>): el comprador ve el estado y sus QR aunque el correo no le llegue
   acceso             text not null unique default (replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', '')),
   ref                text check (ref is null or ref ~ '^[a-z0-9-]{1,40}$'),   -- promotor (?r= en el link de venta)
+  titulares          jsonb,                                                      -- [{nombre, ci}] por entrada, lo que escribió el comprador (opcional)
   creada_en          timestamptz not null default now(),
   resuelta_en        timestamptz,
   constraint ck_motivo check (estado <> 'Rechazada' or char_length(coalesce(motivo_rechazo, '')) >= 3)
@@ -114,11 +115,58 @@ create table entradas (
   anulada_motivo text,
   creada_por     uuid references usuarios (id),
   creada_en      timestamptz not null default now(),
+  ci               text check (ci is null or ci ~ '^[A-Za-z0-9][A-Za-z0-9 .-]{2,18}[A-Za-z0-9]$'),   -- cédula del titular (opcional)
+  numero_en_orden  int,                                 -- posición dentro de su orden (1..N)
+  titular_definido boolean not null default true,       -- false: lleva el nombre del comprador, nadie escribió el del acompañante
+  transferencias   int not null default 0,              -- cuántas veces se transfirió (cada una emite un QR nuevo)
   constraint ck_usada_coherente check ((estado = 'usada') = (usada_en is not null)),
   constraint ck_anulada_coherente check ((estado = 'anulada') = (anulada_en is not null))
 );
 create index entradas_evento_idx on entradas (evento_id, estado);
 create index entradas_orden_idx  on entradas (orden_id);
+
+create table if not exists entrada_cambios (
+  id              uuid primary key default gen_random_uuid(),
+  entrada_id      uuid not null references entradas (id) on delete restrict,
+  tipo            text not null check (tipo in ('titular', 'transferencia')),
+  por             text not null,                 -- «comprador» o el nombre del usuario del equipo
+  nombre_anterior text,
+  ci_anterior     text,
+  nombre_nuevo    text,
+  ci_nuevo        text,
+  creado_en       timestamptz not null default now()
+);
+create index if not exists entrada_cambios_entrada_idx on entrada_cambios (entrada_id);
+alter table entrada_cambios enable row level security;
+
+-- Al insertarse una entrada de una orden: le asigna su número dentro de la orden y aplica el titular que el comprador indicó.
+-- NUNCA lanza error (un dato mal escrito no puede impedir que se apruebe una orden): lo inválido se ignora.
+create or replace function entradas_titular() returns trigger language plpgsql as $$
+declare v_n int; v_t jsonb; v_nom text; v_ci text;
+begin
+  if new.orden_id is null then
+    new.titular_definido := true;
+    return new;
+  end if;
+  select coalesce(max(numero_en_orden), 0) + 1 into v_n from entradas where orden_id = new.orden_id;
+  new.numero_en_orden := v_n;
+  new.titular_definido := (v_n = 1);
+  select titulares -> (v_n - 1) into v_t from ordenes where id = new.orden_id;
+  if v_t is not null and jsonb_typeof(v_t) = 'object' then
+    v_nom := nullif(btrim(v_t ->> 'nombre'), '');
+    if v_n > 1 and v_nom is not null and char_length(v_nom) between 2 and 100 then
+      new.nombre := v_nom;
+      new.titular_definido := true;
+    end if;
+    v_ci := nullif(btrim(v_t ->> 'ci'), '');
+    if v_ci is not null and v_ci ~ '^[A-Za-z0-9][A-Za-z0-9 .-]{2,18}[A-Za-z0-9]$' then
+      new.ci := v_ci;
+    end if;
+  end if;
+  return new;
+end $$;
+drop trigger if exists entradas_titular_bi on entradas;
+create trigger entradas_titular_bi before insert on entradas for each row execute function entradas_titular();
 
 -- La API usa la clave service_role (ignora RLS). RLS sin políticas bloquea la clave pública.
 alter table organizaciones enable row level security;

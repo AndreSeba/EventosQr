@@ -8,6 +8,8 @@ export const PUBLICAS = [
   "GET /api/public/eventos/:slug",
   "POST /api/public/eventos/:slug/ordenes",
   "GET /api/public/ordenes/:acceso", // protegida por el token secreto de la orden (64 caracteres al azar)
+  "PUT /api/public/ordenes/:acceso/entradas/:n", // ídem: corregir el titular de una entrada de SU orden
+  "POST /api/public/ordenes/:acceso/entradas/:n/transferir", // ídem: transferir (QR nuevo)
 ];
 
 /** Dependen solo del usuario de la sesión (no reciben ids de otros recursos). */
@@ -38,6 +40,7 @@ export const AISLADAS = [
   "POST /api/entradas",
   "POST /api/entradas/:id/anular",
   "POST /api/entradas/:id/reenviar",
+  "PUT /api/entradas/:id/titular",
   "GET /api/usuarios",
   "POST /api/usuarios",
   "PUT /api/usuarios/:id",

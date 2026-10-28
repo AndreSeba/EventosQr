@@ -5,7 +5,9 @@ import { db, todas } from "../lib/db";
 import { errorDeFuncionSql, HttpError } from "../lib/errores";
 import { enviarEntradas, type DatosEvento } from "../lib/mailer";
 import { generarToken } from "../lib/tickets";
+import { limpiarCi, limpiarNombre } from "../lib/titulares";
 import { emailValido } from "../lib/validar";
+import { registrarCambioEntrada } from "../services/ordenes";
 
 type Rel<T> = T | T[] | null;
 const uno = <T>(r: Rel<T>): T | undefined => (Array.isArray(r) ? r[0] : (r ?? undefined));
@@ -29,7 +31,7 @@ export async function entradasRoutes(app: FastifyInstance) {
     const filas = await todas<any>(() => {
       let c = db()
         .from("entradas")
-        .select("id, nombre, email, estado, usada_en, anulada_motivo, creada_en, orden_id, tipos_ticket(nombre, categoria)")
+        .select("id, nombre, email, estado, usada_en, anulada_motivo, creada_en, orden_id, ci, numero_en_orden, titular_definido, transferencias, tipos_ticket(nombre, categoria), ordenes(numero, cantidad)")
         .eq("evento_id", eventoId)
         .order("creada_en", { ascending: false })
         .order("id"); // desempate: con 1.000+ filas los bloques no deben repetir ni saltarse filas
@@ -39,9 +41,12 @@ export async function entradasRoutes(app: FastifyInstance) {
     });
     return filas.map((e) => {
       const t = uno<{ nombre: string; categoria: string }>(e.tipos_ticket);
+      const o = uno<{ numero: number; cantidad: number }>(e.ordenes);
       return {
         id: e.id, nombre: e.nombre, email: e.email, estado: e.estado, usadaEn: e.usada_en, anuladaMotivo: e.anulada_motivo,
         creadaEn: e.creada_en, tipo: t?.nombre ?? "", categoria: t?.categoria ?? "", deOrden: !!e.orden_id,
+        ci: e.ci, titularDefinido: e.titular_definido, transferencias: e.transferencias,
+        ordenNumero: o ? Number(o.numero) : null, numeroEnOrden: e.numero_en_orden, totalOrden: o?.cantidad ?? null,
       };
     });
   });
@@ -87,6 +92,28 @@ export async function entradasRoutes(app: FastifyInstance) {
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!data) throw new HttpError(409, "Solo se pueden anular entradas vigentes (no usadas ni ya anuladas).");
+    return { ok: true };
+  });
+
+  // Corregir el titular (nombre y/o cédula) de una entrada vigente: lo hace el administrador, por ejemplo cuando el comprador
+  // avisa el nombre de su acompañante. Queda registrado quién lo cambió y qué había antes.
+  app.put<{ Params: { id: string } }>("/entradas/:id/titular", { preHandler: exigir("admin") }, async (req) => {
+    await exigirEntrada(req.usuario, req.params.id);
+    const body = (req.body ?? {}) as { nombre?: unknown; ci?: unknown };
+    const nom = limpiarNombre(body.nombre);
+    if (!nom.ok) throw new HttpError(400, "El nombre debe tener entre 2 y 100 letras.");
+    const ci = body.ci === undefined ? undefined : limpiarCi(body.ci);
+    if (ci && !ci.ok) throw new HttpError(400, "La cédula no es válida (4 a 20 letras o números).");
+    const cambios: Record<string, unknown> = {};
+    if (nom.nombre) { cambios.nombre = nom.nombre; cambios.titular_definido = true; }
+    if (ci && ci.ok) cambios.ci = ci.ci;
+    if (!Object.keys(cambios).length) throw new HttpError(400, "No hay nada para cambiar.");
+    const { data: antes } = await db().from("entradas").select("nombre, ci").eq("id", req.params.id).single();
+    const { data, error } = await db().from("entradas").update(cambios).eq("id", req.params.id).eq("estado", "valida").select("id").maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!data) throw new HttpError(409, "Solo se pueden cambiar entradas vigentes (no usadas ni anuladas).");
+    await registrarCambioEntrada(req.params.id, "titular", req.usuario.nombre, antes as { nombre: string; ci: string | null },
+      { nombre: (cambios.nombre as string) ?? antes!.nombre, ci: "ci" in cambios ? (cambios.ci as string | null) : (antes!.ci as string | null) });
     return { ok: true };
   });
 

@@ -154,6 +154,7 @@ async function main() {
   check("emitir en MI evento con un tipo de B → 400", (await call("/entradas", { token: tA, body: { eventoId: A.ev.id, tipoTicketId: B.tCort, nombre: "Colado" } })).s === 400);
   check("anular entrada de B → 404", como404(await call(`/entradas/${entradaBvalida.id}/anular`, { token: tA, body: { motivo: "sabotaje" } })), "", "POST /api/entradas/:id/anular");
   check("reenviar entrada de B → 404", como404(await call(`/entradas/${entradaBvalida.id}/reenviar`, { token: tA, body: {} })), "", "POST /api/entradas/:id/reenviar");
+  check("editar el titular de una entrada de B → 404", como404(await call(`/entradas/${entradaBvalida.id}/titular`, { token: tA, method: "PUT", body: { nombre: "Colado Hackeado" } })), "", "PUT /api/entradas/:id/titular");
   check("editar usuario de B → 404", como404(await call(`/usuarios/${B.idStaff}`, { token: tA, method: "PUT", body: { nombre: "Hackeado", rol: "admin", activo: true, password: "NuevaClave-123" } })), "", "PUT /api/usuarios/:id");
   check("el staff de B NO cambió de contraseña (sigue entrando con la suya)", !!(await login(B.staffEmail)));
 

@@ -5,6 +5,7 @@ import { errorDeFuncionSql, HttpError } from "../lib/errores";
 import { enviarEntradas, enviarRechazo, type DatosEvento } from "../lib/mailer";
 import { sha256Hex } from "../lib/seguridad";
 import { generarToken, qrPng } from "../lib/tickets";
+import { limpiarCi, limpiarNombre, ocultarCi, type Titular } from "../lib/titulares";
 import { ocultarCorreo, type DatosOrden, type TipoArchivo } from "../lib/validar";
 
 export async function crearOrden(
@@ -14,6 +15,7 @@ export async function crearOrden(
   archivo: Uint8Array,
   tipoArchivo: TipoArchivo,
   ref: string | null = null,
+  titulares: Titular[] | null = null,
 ): Promise<{ numero: number; acceso: string | null }> {
   const path = `${slug}/${randomUUID()}.${tipoArchivo.ext}`;
   const sub = await db().storage.from(BUCKET_COMPROBANTES).upload(path, archivo, { contentType: tipoArchivo.mime, upsert: false });
@@ -34,9 +36,12 @@ export async function crearOrden(
     throw errorDeFuncionSql(error.message) ?? new Error(error.message);
   }
   const numero = Number(data);
-  // El promotor solo sirve para contar ventas: si esto fallara, la orden ya está creada y la compra sigue siendo válida
-  const fila = ref
-    ? await db().from("ordenes").update({ ref }).eq("numero", numero).select("acceso").maybeSingle()
+  // El promotor y los datos de los titulares son opcionales: si esto fallara, la orden ya está creada y la compra sigue siendo válida
+  const extra: Record<string, unknown> = {};
+  if (ref) extra.ref = ref;
+  if (titulares) extra.titulares = titulares;
+  const fila = Object.keys(extra).length
+    ? await db().from("ordenes").update(extra).eq("numero", numero).select("acceso").maybeSingle()
     : await db().from("ordenes").select("acceso").eq("numero", numero).maybeSingle();
   return { numero, acceso: (fila.data?.acceso as string | undefined) ?? null };
 }
@@ -53,15 +58,31 @@ export async function ordenPublica(acceso: string) {
     .maybeSingle();
   if (!o) throw new HttpError(404, "Orden no encontrada.");
   const ev = uno(o.eventos as unknown as Record<string, any> | Record<string, any>[] | null)!;
-  let entradas: { tipo: string; estado: string; qr: string | null }[] = [];
+  type EntradaPublica = {
+    n: number; tipo: string; estado: string; qr: string | null; nombre: string; titularDefinido: boolean; ciParcial: string | null;
+    transferencias: number; editable: boolean;
+  };
+  let entradas: EntradaPublica[] = [];
   if (o.estado === "Aprobada") {
-    const { data } = await db().from("entradas").select("token, estado, tipos_ticket(nombre)").eq("orden_id", o.id).order("creada_en");
+    const { data } = await db()
+      .from("entradas")
+      .select("token, estado, nombre, ci, numero_en_orden, titular_definido, transferencias, tipos_ticket(nombre)")
+      .eq("orden_id", o.id)
+      .order("numero_en_orden");
+    // Los datos y la transferencia se pueden cambiar hasta que empieza el evento, mientras la entrada siga vigente
+    const antesDelEvento = new Date(ev.fecha_inicio).getTime() > Date.now();
     entradas = await Promise.all(
       (data ?? []).map(async (e) => ({
+        n: e.numero_en_orden as number,
         tipo: uno(e.tipos_ticket as unknown as { nombre: string } | { nombre: string }[] | null)?.nombre ?? "",
         estado: e.estado as string,
         // Una entrada anulada no muestra su QR
         qr: e.estado === "anulada" ? null : `data:image/png;base64,${(await qrPng(e.token as string)).toString("base64")}`,
+        nombre: e.nombre as string,
+        titularDefinido: e.titular_definido as boolean,
+        ciParcial: ocultarCi(e.ci as string | null),
+        transferencias: e.transferencias as number,
+        editable: e.estado === "valida" && antesDelEvento,
       })),
     );
   }
@@ -75,6 +96,70 @@ export async function ordenPublica(acceso: string) {
     },
     entradas,
   };
+}
+
+// ---------- Titular de cada entrada ----------
+const MAX_TRANSFERENCIAS = 3;
+type DatosEntrada = { nombre: string; ci: string | null };
+
+/** Deja constancia de quién cambió el titular de una entrada y qué había antes. Si el registro falla, el cambio ya hecho no se deshace. */
+export async function registrarCambioEntrada(entradaId: string, tipo: "titular" | "transferencia", por: string, antes: DatosEntrada, despues: DatosEntrada): Promise<void> {
+  const { error } = await db().from("entrada_cambios").insert({
+    entrada_id: entradaId, tipo, por, nombre_anterior: antes.nombre, ci_anterior: antes.ci, nombre_nuevo: despues.nombre, ci_nuevo: despues.ci,
+  });
+  if (error) console.error("No se pudo registrar el cambio de titular:", error.message);
+}
+
+async function entradaDeOrden(acceso: string, n: number) {
+  if (!/^[a-f0-9]{64}$/.test(acceso) || !Number.isInteger(n) || n < 1 || n > 50) throw new HttpError(404, "Orden no encontrada.");
+  const { data: o } = await db().from("ordenes").select("id, estado, eventos(fecha_inicio)").eq("acceso", acceso).maybeSingle();
+  if (!o) throw new HttpError(404, "Orden no encontrada.");
+  if (o.estado !== "Aprobada") throw new HttpError(409, "La orden todavía no está aprobada.");
+  const ev = uno(o.eventos as unknown as { fecha_inicio: string } | { fecha_inicio: string }[] | null);
+  if (!ev || new Date(ev.fecha_inicio).getTime() <= Date.now())
+    throw new HttpError(409, "El evento ya empezó: desde acá los datos ya no se pueden cambiar. Pedíselo al organizador.");
+  const { data: e } = await db().from("entradas").select("id, estado, nombre, ci, transferencias").eq("orden_id", o.id).eq("numero_en_orden", n).maybeSingle();
+  if (!e) throw new HttpError(404, "Entrada no encontrada.");
+  if (e.estado !== "valida") throw new HttpError(409, "Solo se pueden cambiar entradas vigentes (no usadas ni anuladas).");
+  return e as { id: string; estado: string; nombre: string; ci: string | null; transferencias: number };
+}
+
+/** El comprador corrige el nombre o la cédula del titular de una de sus entradas (el QR sigue siendo el mismo). */
+export async function cambiarTitularComprador(acceso: string, n: number, body: { nombre?: unknown; ci?: unknown }): Promise<void> {
+  const nom = limpiarNombre(body.nombre);
+  if (!nom.ok) throw new HttpError(400, "El nombre debe tener entre 2 y 100 letras.");
+  const ci = body.ci === undefined ? undefined : limpiarCi(body.ci);
+  if (ci && !ci.ok) throw new HttpError(400, "La cédula no es válida (4 a 20 letras o números).");
+  const cambios: Record<string, unknown> = {};
+  if (nom.nombre) { cambios.nombre = nom.nombre; cambios.titular_definido = true; }
+  if (ci && ci.ok) cambios.ci = ci.ci;
+  if (!Object.keys(cambios).length) throw new HttpError(400, "No hay nada para cambiar.");
+  const e = await entradaDeOrden(acceso, n);
+  const { data, error } = await db().from("entradas").update(cambios).eq("id", e.id).eq("estado", "valida").select("id").maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new HttpError(409, "Esta entrada ya no está vigente.");
+  await registrarCambioEntrada(e.id, "titular", "comprador", e, { nombre: (cambios.nombre as string) ?? e.nombre, ci: "ci" in cambios ? (cambios.ci as string | null) : e.ci });
+}
+
+/** Transferir: la entrada pasa a otra persona con un QR NUEVO y el anterior deja de servir, así una captura vieja ya no sirve para entrar. */
+export async function transferirEntrada(acceso: string, n: number, body: { nombre?: unknown; ci?: unknown }): Promise<void> {
+  const nom = limpiarNombre(body.nombre);
+  if (!nom.ok || !nom.nombre) throw new HttpError(400, "Ingresá el nombre de quien recibe la entrada (2 a 100 letras).");
+  const ci = limpiarCi(body.ci);
+  if (!ci.ok) throw new HttpError(400, "La cédula no es válida (4 a 20 letras o números).");
+  const e = await entradaDeOrden(acceso, n);
+  if (e.transferencias >= MAX_TRANSFERENCIAS) throw new HttpError(409, `Esta entrada ya se transfirió ${MAX_TRANSFERENCIAS} veces. Para otro cambio, escribile al organizador.`);
+  const { data, error } = await db()
+    .from("entradas")
+    .update({ token: generarToken(), nombre: nom.nombre, ci: ci.ci, titular_definido: true, transferencias: e.transferencias + 1 })
+    .eq("id", e.id)
+    .eq("estado", "valida")
+    .eq("transferencias", e.transferencias) // si dos transferencias llegan juntas, solo una gana
+    .select("id")
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new HttpError(409, "La entrada cambió mientras tanto. Volvé a intentarlo.");
+  await registrarCambioEntrada(e.id, "transferencia", "comprador", e, { nombre: nom.nombre, ci: ci.ci });
 }
 
 type OrdenFila = { id: string; evento_id: string; tipo_ticket_id: string; nombre: string; email: string; cantidad: number };

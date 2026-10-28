@@ -34,7 +34,8 @@
     "dev:db": "powershell -ExecutionPolicy Bypass -File dev/iniciar.ps1",
     "dev:db:stop": "powershell -ExecutionPolicy Bypass -File dev/detener.ps1",
     "test:carga": "tsx tests/carga/simulacion.ts",
-    "test:aislamiento": "tsx tests/aislamiento/aislamiento.ts"
+    "test:aislamiento": "tsx tests/aislamiento/aislamiento.ts",
+    "test:titulares": "tsx tests/titulares/titulares.ts"
   },
   "engines": {
     "node": ">=22"

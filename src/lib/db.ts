@@ -43,21 +43,30 @@ export const supabaseEntradaStore: EntradaStore = {
       .eq("token", token)
       .eq("estado", "valida");
     if (eventosPermitidos) q = q.in("evento_id", eventosPermitidos);
-    const { data, error } = await q.select("nombre, tipos_ticket(nombre)");
+    const { data, error } = await q.select("nombre, ci, numero_en_orden, titular_definido, tipos_ticket(nombre), ordenes(cantidad)");
     if (error) throw new Error(error.message);
     if (!data || data.length !== 1) return null;
     const t = uno(data[0].tipos_ticket as Rel<{ nombre: string }>);
-    return { nombre: data[0].nombre as string, tipo: t?.nombre ?? "" };
+    const o = uno(data[0].ordenes as Rel<{ cantidad: number }>);
+    return {
+      nombre: data[0].nombre as string, tipo: t?.nombre ?? "",
+      ci: data[0].ci as string | null, numeroEnOrden: data[0].numero_en_orden as number | null, totalOrden: o?.cantidad ?? null,
+      titularDefinido: data[0].titular_definido as boolean,
+    };
   },
   async buscar(token) {
     const { data, error } = await db()
       .from("entradas")
-      .select("nombre, estado, usada_en, evento_id, tipos_ticket(nombre)")
+      .select("nombre, estado, usada_en, evento_id, ci, numero_en_orden, titular_definido, tipos_ticket(nombre), ordenes(cantidad)")
       .eq("token", token)
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!data) return null;
     const t = uno(data.tipos_ticket as Rel<{ nombre: string }>);
-    return { nombre: data.nombre, tipo: t?.nombre ?? "", estado: data.estado, usadaEn: data.usada_en, eventoId: data.evento_id };
+    const o = uno(data.ordenes as Rel<{ cantidad: number }>);
+    return {
+      nombre: data.nombre, tipo: t?.nombre ?? "", estado: data.estado, usadaEn: data.usada_en, eventoId: data.evento_id,
+      ci: data.ci, numeroEnOrden: data.numero_en_orden, totalOrden: o?.cantidad ?? null, titularDefinido: data.titular_definido,
+    };
   },
 };
