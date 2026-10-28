@@ -107,3 +107,14 @@ con nombre, fecha e imagen al compartir por WhatsApp (función de Cloudflare Pag
 - Plan de pago de Render (7 USD/mes): no duerme el servidor y permite SMTP.
 - Reducir latencia: mover API y base a una región más cercana a Bolivia (hoy Oregon, ~270 ms por viaje).
 - Entrada con diseño propio (imagen o PDF) en vez de solo el QR en el correo.
+
+### Titular por entrada (hecho en `dev`, falta publicar)
+
+Cédula y acompañantes opcionales al comprar; cada entrada lleva «n de N» dentro de su orden; el comprador corrige nombre y cédula o **transfiere**
+(QR nuevo, el anterior deja de servir) desde el link de su orden hasta que empiece el evento (máx. 3 transferencias por entrada); el administrador
+corrige el titular desde Invitados; el escáner muestra «Entrada 2 de 3» y la cédula; los Excel traen CI y «n de N». Todo cambio queda en `entrada_cambios`.
+- [ ] Al publicar: ejecutar `supabase/migraciones/005_titulares.sql` en Supabase ANTES de desplegar el API (idempotente; numera las entradas ya emitidas:
+      las que no son la primera de su orden quedan como «sin nombre propio»).
+- [ ] Orden #400 de JIWILIN (2 entradas a un mismo nombre): pedirle al comprador el nombre del acompañante y cargarlo desde Invitados → «Titular».
+- [ ] Probar con el celular real el flujo de transferir (confirmación del navegador) y el escáner con la cámara.
+- Pruebas: `pnpm run test:titulares` (51 verificaciones), además de `test:aislamiento` (53) y `test:carga` (30).
